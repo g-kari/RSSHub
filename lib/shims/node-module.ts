@@ -76,6 +76,31 @@ const vmShim = {
     },
 };
 
+// Cluster shim for Cloudflare Workers
+// cluster module is not available in Workers; signal non-cluster environment
+const cluster = {
+    isWorker: false,
+    isPrimary: true,
+    isMaster: true,
+    workers: {} as Record<string, unknown>,
+    fork: () => {
+        throw new Error('cluster.fork is not supported in Cloudflare Workers');
+    },
+    disconnect: () => {
+        throw new Error('cluster.disconnect is not supported in Cloudflare Workers');
+    },
+    setupPrimary: () => {
+        throw new Error('cluster.setupPrimary is not supported in Cloudflare Workers');
+    },
+    setupMaster: () => {
+        throw new Error('cluster.setupMaster is not supported in Cloudflare Workers');
+    },
+    on: () => cluster,
+    once: () => cluster,
+    emit: () => false,
+    removeListener: () => cluster,
+};
+
 // Child process shim (inline to avoid import cycle)
 const child_process = {
     execSync: (_command: string): Buffer => Buffer.from(''),
@@ -124,6 +149,7 @@ const builtinModules: Record<string, unknown> = {
     tty,
     net,
     dns,
+    cluster,
     child_process,
     string_decoder,
     timers,
@@ -158,6 +184,7 @@ const builtinModules: Record<string, unknown> = {
     'node:tty': tty,
     'node:net': net,
     'node:dns': dns,
+    'node:cluster': cluster,
     'node:child_process': child_process,
     'node:string_decoder': string_decoder,
     'node:timers': timers,
