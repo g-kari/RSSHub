@@ -5,6 +5,7 @@ updates:
       schedule:
           interval: daily
           time: '08:00'
+      minimum-release-age: 3
       open-pull-requests-limit: 100
       labels:
           - dependencies
