@@ -30,7 +30,9 @@ const globalCache: {
             value = JSON.stringify(value);
         }
         if (key) {
-            await getKVNamespace()!.put(key, value, { expirationTtl: maxAge });
+            // Cloudflare KV enforces a minimum expirationTtl of 60 seconds.
+            const ttl = Math.max(60, maxAge);
+            await getKVNamespace()!.put(key, value, { expirationTtl: ttl });
         }
     },
 };
