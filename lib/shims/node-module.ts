@@ -127,8 +127,23 @@ const child_process = {
 
 // Create a CJS-compatible events module
 // In CJS, require('events') returns EventEmitter class directly (the default export)
-// but also has named exports attached to it
-const eventsModule = Object.assign(events, eventsNamespace);
+// but also has named exports attached to it.
+// Filter out `undefined` values and reserved setters (e.g. `captureRejections`)
+// because EventEmitter has a strict boolean setter that throws on undefined in workerd.
+const eventsModule = events as typeof events & Record<string, unknown>;
+for (const [key, value] of Object.entries(eventsNamespace)) {
+    if (value === undefined) {
+        continue;
+    }
+    if (key === 'captureRejections' || key === 'default') {
+        continue;
+    }
+    try {
+        (eventsModule as Record<string, unknown>)[key] = value;
+    } catch {
+        // ignore read-only or restricted setters
+    }
+}
 
 // Map of module names to their exports
 const builtinModules: Record<string, unknown> = {
