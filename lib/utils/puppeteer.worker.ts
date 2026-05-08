@@ -31,6 +31,14 @@ const getBrowserBinding = () => {
  * @deprecated use getPuppeteerPage instead
  * @returns Puppeteer browser
  */
+// Browser session safety net: even if a route forgets to call destroy(),
+// the browser is force-closed after this delay so we don't leak the
+// per-account Cloudflare Browser Rendering quota.
+// Must be >= waitForSelector default (30s) + page.goto allowance, otherwise
+// the close fires mid-operation and surfaces as
+// "Protocol error (Runtime.callFunctionOn): Target closed".
+const BROWSER_FORCE_CLOSE_MS = 90000;
+
 const outPuppeteer = async () => {
     const binding = getBrowserBinding();
     const browser = await puppeteer.launch(binding, {
@@ -39,7 +47,7 @@ const outPuppeteer = async () => {
 
     setTimeout(async () => {
         await browser.close();
-    }, 30000);
+    }, BROWSER_FORCE_CLOSE_MS);
 
     return browser;
 };
@@ -69,7 +77,7 @@ export const getPuppeteerPage = async (
 
     setTimeout(async () => {
         await browser.close();
-    }, 30000);
+    }, BROWSER_FORCE_CLOSE_MS);
 
     const page = await browser.newPage();
 
