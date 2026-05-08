@@ -122996,8 +122996,8 @@ export default {
         "maintainers": [
           "TonyRL"
         ],
-        "location": "user.ts",
-        "module": () => import('@/routes/tiktok/user.ts')
+        "location": "user.worker.ts",
+        "module": () => import('@/routes/tiktok/user.worker.ts')
       }
     },
     "apiRoutes": {},
@@ -140422,8 +140422,8 @@ export default {
           "devinmugen",
           "NekoAria"
         ],
-        "location": "profile.ts",
-        "module": () => import('@/routes/picuki/profile.ts')
+        "location": "profile.worker.ts",
+        "module": () => import('@/routes/picuki/profile.worker.ts')
       }
     },
     "apiRoutes": {},
