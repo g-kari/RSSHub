@@ -19,7 +19,7 @@ export const route: Route = {
     },
     radar: [
         {
-            source: ['github.com/topics'],
+            source: ['github.com/topics/:name'],
         },
     ],
     name: 'Topics',
@@ -49,17 +49,17 @@ async function handler(ctx) {
         item: $('article.border')
             .toArray()
             .map((item) => {
-                item = $(item);
+                const $item = $(item);
 
-                const title = item.find('h3').text().trim();
-                const author = title.split('/')[0];
-                const description = (item.find('a img').prop('outerHTML') ?? '') + item.find('div > div > p').text();
-                const link = `https://github.com${item.find('h3 a').last().attr('href')}`;
-                const category = item
+                const title = $item.find('h3').text();
+                const author = $item.find('h3 a').first().attr('href')?.slice(1);
+                const description = ($item.find('a img').prop('outerHTML') ?? '') + $item.find('div > div > p').text();
+                const link = `https://github.com${$item.find('h3 a').last().attr('href')}`;
+                const category = $item
                     .find('.topic-tag')
                     .toArray()
-                    .map((item) => $(item).text().trim());
-                const pubDate = parseDate(item.find('relative-time').attr('datetime'));
+                    .map((item) => $(item).text());
+                const pubDate = parseDate($item.find('relative-time').attr('datetime')!);
 
                 return {
                     title,

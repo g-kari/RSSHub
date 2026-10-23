@@ -1,7 +1,8 @@
-import type { DataItem, Route } from '@/types';
+import type { Route } from '@/types';
 import { ViewType } from '@/types';
 import ofetch from '@/utils/ofetch';
 import { parseDate } from '@/utils/parse-date';
+import { getRouteLimit } from '@/utils/route-limit';
 
 const platformIds = {
     osx: 'macOS',
@@ -79,7 +80,7 @@ async function handler(ctx) {
     }
     platform = undefined;
 
-    const limit = ctx.req.query('limit') ? Number.parseInt(ctx.req.query('limit'), 10) : 100;
+    const limit = getRouteLimit(ctx, 100);
 
     const rootUrl = 'https://apps.apple.com';
     const currentUrl = new URL(`${country}/app/${id}`, rootUrl).href;
@@ -113,7 +114,7 @@ async function handler(ctx) {
     const artistName = attributes.artistName;
     const platformAttributes = attributes.platformAttributes;
 
-    let items: DataItem[] = [];
+    let items: any[] = [];
     let title: string;
     let description = '';
     let image = '';
@@ -129,8 +130,7 @@ async function handler(ctx) {
         image = platformAttribute.iconArtwork?.url?.replace('{w}x{h}{c}.{f}', '3000x3000bb.webp');
     } else {
         title = appName;
-        for (const pid of Object.keys(platformAttributes)) {
-            const platformAttribute = platformAttributes[pid];
+        for (const [pid, platformAttribute] of Object.entries<any>(platformAttributes)) {
             items = [
                 ...items,
                 ...platformAttribute.versionHistory.map((v) => ({
@@ -143,19 +143,22 @@ async function handler(ctx) {
         }
     }
 
-    items = items.slice(0, limit).map((item) => {
-        const pid = item.platformId ?? platformId;
-        const p = platform ?? (Object.hasOwn(platformIds, pid) ? platformIds[pid] : pid);
+    items = items
+        .toSorted((a, b) => Number(parseDate(b.releaseTimestamp)) - Number(parseDate(a.releaseTimestamp)))
+        .slice(0, limit)
+        .map((item) => {
+            const pid = item.platformId ?? platformId;
+            const p = platform ?? (Object.hasOwn(platformIds, pid) ? platformIds[pid] : pid);
 
-        return {
-            title: `${appName} ${item.versionDisplay} for ${p}`,
-            link: currentUrl,
-            description: item.releaseNotes?.replaceAll('\n', '<br>'),
-            category: [p],
-            guid: `apple/apps/${country}/${id}/${pid}#${item.versionDisplay}`,
-            pubDate: parseDate(item.releaseTimestamp),
-        };
-    });
+            return {
+                title: `${appName} ${item.versionDisplay} for ${p}`,
+                link: currentUrl,
+                description: item.releaseNotes?.replaceAll('\n', '<br>'),
+                category: [p],
+                guid: `apple/apps/${country}/${id}/${pid}#${item.versionDisplay}`,
+                pubDate: parseDate(item.releaseTimestamp),
+            };
+        });
 
     return {
         item: items,

@@ -2,13 +2,14 @@ import { load } from 'cheerio';
 
 import type { Route } from '@/types';
 import ofetch from '@/utils/ofetch';
+import { getRouteLimit } from '@/utils/route-limit';
 
 import { buildApiUrl, processItems, rootUrl } from './util';
 
 export const handler = async (ctx) => {
     const { id, filter = 'id' } = ctx.req.param();
 
-    const limit = Number.parseInt(ctx.req.query('limit') ?? '30', 10);
+    const limit = getRouteLimit(ctx, 30);
 
     const currentUrl = new URL(id ? `topic/${id}` : 'discover', rootUrl).href;
 
@@ -22,7 +23,7 @@ export const handler = async (ctx) => {
         data: { results: apiTagProcs },
     } = await ofetch(apiTagProcUrl, {
         query: {
-            ...(id ? { tag: id } : {}),
+            ...(id && { tag: id }),
             page: 1,
             pagesize: 20,
             f: filter,
@@ -33,7 +34,7 @@ export const handler = async (ctx) => {
 
     const items = processItems(apiTagProcs?.slice(0, limit) ?? []);
 
-    const image = new URL($('img.logo').prop('src'), rootUrl).href;
+    const image = new URL($('img.logo').prop('src')!, rootUrl).href;
 
     const author = $('title').text().split(/_/).pop();
 
@@ -104,11 +105,7 @@ export const route: Route = {
     radar: [
         {
             source: ['top.aibase.com/topic/:id'],
-            target: (params) => {
-                const id = params.id;
-
-                return `/topic${id ? `/${id}` : ''}`;
-            },
+            target: '/topic/:id?',
         },
         {
             title: 'AI',

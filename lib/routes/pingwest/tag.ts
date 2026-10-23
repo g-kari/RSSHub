@@ -1,5 +1,6 @@
 import { load } from 'cheerio';
 
+import InvalidParameterError from '@/errors/types/invalid-parameter';
 import type { Route } from '@/types';
 import cache from '@/utils/cache';
 import got from '@/utils/got';
@@ -39,16 +40,15 @@ export const route: Route = {
 
 async function handler(ctx) {
     const { tag, type, option } = ctx.req.param();
+    if (type !== '1' && type !== '2') {
+        throw new InvalidParameterError('Invalid type: use 1 for latest articles or 2 for popular articles.');
+    }
     const needFullText = option === 'fulltext';
 
     const baseUrl = 'https://www.pingwest.com';
     const tagUrl = `${baseUrl}/tag/${tag}`;
     const { tagId, tagName } = await cache.tryGet(`pingwest:tag:${tag}`, async () => {
-        const res = await got(tagUrl, {
-            headers: {
-                Referer: baseUrl,
-            },
-        });
+        const res = await got(tagUrl);
         const $ = load(res.data);
         const tagId = $('.tag-detail').attr('data-id');
         const tagName = $('.tag-detail .info .title').text();
@@ -60,9 +60,6 @@ async function handler(ctx) {
         searchParams: {
             id: tagId,
             type: type - 1,
-        },
-        headers: {
-            Referer: baseUrl,
         },
     });
 

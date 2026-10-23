@@ -1,13 +1,15 @@
 import { load } from 'cheerio';
 import { raw } from 'hono/html';
 import { renderToString } from 'hono/jsx/dom/server';
-import type { JSX } from 'hono/jsx/jsx-runtime';
 
 import type { Route } from '@/types';
 import { ViewType } from '@/types';
 import cache from '@/utils/cache';
 import ofetch from '@/utils/ofetch';
 import { parseDate } from '@/utils/parse-date';
+import { getRouteLimit } from '@/utils/route-limit';
+
+const HEADING_TAGS = ['h1', 'h2', 'h3', 'h4', 'h5', 'h6'] as const;
 
 type ReutersContent = {
     result: {
@@ -99,7 +101,7 @@ const renderDescription = ({ result }: ReutersContent): string => {
                 }
 
                 if (element.type === 'header') {
-                    const HeaderTag = `h${element.level ?? 1}` as keyof JSX.IntrinsicElements;
+                    const HeaderTag = HEADING_TAGS.find((tag) => tag === `h${element.level ?? 1}`) ?? 'h6';
                     return <HeaderTag key={`header-${index}`}>{element.content ? raw(element.content) : null}</HeaderTag>;
                 }
 
@@ -189,7 +191,7 @@ async function handler(ctx) {
 
     const category = ctx.req.param('category');
     const topic = ctx.req.param('topic') ?? (category === 'authors' ? 'reuters' : '');
-    const limit = ctx.req.query('limit') ? Number.parseInt(ctx.req.query('limit')) : 20;
+    const limit = getRouteLimit(ctx, 20);
     const useSophi = ctx.req.query('sophi') === 'true' && topic !== '' && CAN_USE_SOPHI.includes(category);
 
     const section_id = `/${category}/${topic ? `${topic}/` : ''}`;
@@ -197,7 +199,6 @@ async function handler(ctx) {
     const browserHeaders = {
         Accept: 'application/json, text/plain, */*',
         'Accept-Language': 'en-US,en;q=0.9',
-        Referer: 'https://www.reuters.com/',
     };
 
     try {
@@ -222,33 +223,30 @@ async function handler(ctx) {
                     rootUrl,
                     response,
                 };
-            } else {
-                const rootUrl = 'https://www.reuters.com/pf/api/v3/content/fetch/articles-by-section-alias-or-id-v1';
-                const response = await ofetch(rootUrl, {
-                    query: {
-                        query: JSON.stringify({
-                            offset: 0,
-                            size: limit,
-                            section_id,
-                            website: 'reuters',
-                            ...(useSophi
-                                ? {
-                                      fetch_type: 'sophi',
-                                      sophi_page: '*',
-                                      sophi_widget: 'topic',
-                                  }
-                                : {}),
-                        }),
-                    },
-                    headers: browserHeaders,
-                });
-                return {
-                    title: response.result.section.title,
-                    description: response.result.section.section_about,
-                    rootUrl,
-                    response,
-                };
             }
+            const rootUrl = 'https://www.reuters.com/pf/api/v3/content/fetch/articles-by-section-alias-or-id-v1';
+            const response = await ofetch(rootUrl, {
+                query: {
+                    query: JSON.stringify({
+                        offset: 0,
+                        size: limit,
+                        section_id,
+                        website: 'reuters',
+                        ...(useSophi && {
+                            fetch_type: 'sophi',
+                            sophi_page: '*',
+                            sophi_widget: 'topic',
+                        }),
+                    }),
+                },
+                headers: browserHeaders,
+            });
+            return {
+                title: response.result.section.title,
+                description: response.result.section.section_about,
+                rootUrl,
+                response,
+            };
         })();
 
         let items = response.result.articles.map((e) => ({
@@ -268,10 +266,11 @@ async function handler(ctx) {
             items.map((item) =>
                 ctx.req.query('fulltext') === 'true'
                     ? cache.tryGet(item.link, async () => {
-                          const detailResponse = await ofetch(item.link, {
+                          const detailResponse = await ofetch.raw<string>(item.link, {
                               headers: browserHeaders,
                           });
-                          const content = load(detailResponse.data);
+                          const detailHtml = detailResponse._data ?? '';
+                          const content = load(detailHtml);
 
                           if (detailResponse.url.startsWith('https://www.reuters.com/investigates/')) {
                               const ldJson = JSON.parse(content('script[type="application/ld+json"]').text());
@@ -288,7 +287,7 @@ async function handler(ctx) {
 
                           const matches = content('script#fusion-metadata')
                               .text()
-                              .match(/Fusion.globalContent=({[\S\s]*?});/);
+                              .match(/Fusion.globalContent=(\{[\s\S]*?\});/);
 
                           if (matches) {
                               const data = JSON.parse(matches[1]);
@@ -307,13 +306,17 @@ async function handler(ctx) {
                           content('.title').remove();
                           content('.article-metadata').remove();
 
-                          item.title = content('meta[property="og:title"]').attr('content');
-                          item.pubDate = parseDate(detailResponse.data.match(/"datePublished":"(.*?)","dateModified/)[1]);
-                          item.author = detailResponse.data
-                              .match(/{"@type":"Person","name":"(.*?)"}/g)
-                              .map((p) => p.match(/"name":"(.*?)"/)[1])
-                              .join(', ');
-                          item.description = content('article').html();
+                          item.title = content('meta[property="og:title"]').attr('content') || item.title;
+                          const publishedTime = detailHtml.match(/"datePublished":"(.*?)","dateModified/)?.[1];
+                          if (publishedTime) {
+                              item.pubDate = parseDate(publishedTime);
+                          }
+                          const authors = (detailHtml.match(/\{"@type":"Person","name":"(.*?)"\}/g) ?? []).flatMap((person) => {
+                              const name = person.match(/"name":"(.*?)"/)?.[1];
+                              return name ? [name] : [];
+                          });
+                          item.author = authors.join(', ') || item.author;
+                          item.description = content('article').html() || item.description;
 
                           return item;
                       })
@@ -369,5 +372,6 @@ async function handler(ctx) {
                 item: items.slice(0, limit),
             };
         }
+        return null;
     }
 }

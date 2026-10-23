@@ -1,4 +1,5 @@
 import { load } from 'cheerio';
+import pMap from 'p-map';
 
 import type { DataItem } from '@/types';
 import cache from '@/utils/cache';
@@ -68,9 +69,9 @@ export const parseArticleList = (response: string) => {
         .filter((item) => item !== undefined) satisfies DataItem[];
 };
 
-export const getArticle = (item) =>
-    cache.tryGet(item.link, async () => {
-        const response = await ofetch(item.link);
+const getArticle = async (item: DataItem): Promise<DataItem> => {
+    const detail = await cache.tryGet(`${item.link}#article-body`, async () => {
+        const response = await ofetch(item.link!);
         const $ = load(response);
         const content = $('.Mid2L_con, .MidLcon');
         content.find('.appGameBuyCardIframe, .GSAppButton, .Mid2L_down').remove();
@@ -91,9 +92,12 @@ export const getArticle = (item) =>
                 item.attribs.style = 'display: list-item;';
             }
         });
-        item.description = content.html() || item.description;
-        return item satisfies DataItem;
-    }) as Promise<DataItem>;
+        return { description: content.html() };
+    });
+    return { ...item, description: detail.description || item.description };
+};
+
+export const getArticles = (list: DataItem[]): Promise<DataItem[]> => pMap(list, getArticle, { concurrency: 3 });
 
 export const getUserArticleList = async (userId: string) => {
     const response = await ofetch<UserArticleList>(
@@ -107,35 +111,48 @@ export const getUserArticleList = async (userId: string) => {
     return response.body;
 };
 
+function parseUserTimestamp(timestamp?: string): Date | undefined {
+    if (!timestamp) {
+        return;
+    }
+    const date = parseDate(timestamp);
+    if (!Number.isFinite(date.getTime())) {
+        return;
+    }
+    return /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(?::\d{2})?$/.test(timestamp) ? timezone(date, 8) : date;
+}
+
 export const parseUserArticleList = (body: string) => {
     const $ = load(body);
     const list = $('.cmt-list');
     const info = list.find('.uname').first();
+    const items: DataItem[] = list.toArray().map((item) => {
+        const e = $(item);
+        const title = e.find('.qzcmt-content-tit a');
+        return {
+            title: title.text(),
+            link: title.attr('href'),
+            pubDate: parseUserTimestamp(e.attr('data-time')),
+            description: e.find('.qzcmt-content-txt span').text(),
+        };
+    });
     return {
         uname: info.text(),
         link: info.attr('href'),
-        list: list.toArray().map((item) => {
-            const e = $(item);
-            const title = e.find('.qzcmt-content-tit a');
-            return {
-                title: title.text(),
-                link: title.attr('href'),
-                pubDate: parseDate(e.attr('data-time')!),
-                description: e.find('.qzcmt-content-txt span').text(),
-            };
-        }) as DataItem[],
+        list: items,
     };
 };
 
-export const getUserArticle = (item: DataItem) =>
-    cache.tryGet(item.link!, async () => {
+export const getUserArticle = async (item: DataItem): Promise<DataItem> => {
+    const detail = await cache.tryGet(`${item.link}#user-article-body`, async () => {
         const response = await ofetch(item.link!);
         const $ = load(response);
-        item.description = $('.qzcmt-content-txt').html() || item.description;
-        return item;
+        return { description: $('.qzcmt-content-txt').html() };
     });
+    return { ...item, description: detail.description || item.description };
+};
 
 export function mdTableBuilder(data: idNameMap[]) {
-    const table = '|' + data.map((item) => `${item.type}|`).join('') + '\n|' + Array.from({ length: data.length }).fill('---|').join('') + '\n|' + data.map((item) => `${item.name}|`).join('') + '\n';
+    const table = '|' + data.map((item) => `${item.type}|`).join('') + '\n|' + Array.from({ length: data.length }, () => '---|').join('') + '\n|' + data.map((item) => `${item.name}|`).join('') + '\n';
     return table;
 }

@@ -25,12 +25,13 @@ export const cnNewsHander = async (limit: number) => {
         title: item.title,
         link: item.url,
         pubDate: timezone(parseDate(item.time), 8),
-        image: item.pic?.split('?')[0],
+        image: item.pic?.split('?', 1)[0],
     }));
 
     return {
         title: '拜仁慕尼黑俱乐部中文官方网站 - 新闻',
         link: 'https://www.fcbayern.cn/news',
+        language: 'zh-CN',
         item: items,
     } satisfies Data;
 };

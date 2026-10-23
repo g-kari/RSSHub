@@ -21,12 +21,6 @@ export const route: Route = {
         supportPodcast: false,
         supportScihub: false,
     },
-    radar: [
-        {
-            source: ['nowcoder.com/'],
-            target: '/experience',
-        },
-    ],
     name: '面经',
     maintainers: ['huyyi'],
     handler,
@@ -45,8 +39,8 @@ async function handler(ctx) {
     const link = new URL('/discuss/experience/json', host);
 
     // const link = `https://www.nowcoder.com/discuss/experience/json?tagId=${tagId}&order=${order}&companyId=${companyId}&phaseId=${phaseId}`;
-    link.search = params;
-    const response = await got.get(link.toString());
+    link.search = params.toString();
+    const response = await got.get(link.href);
     const data = response.data.data;
 
     const list = data.discussPosts.map((x) => {
@@ -54,7 +48,7 @@ async function handler(ctx) {
             title: x.postTitle,
             link: new URL('discuss/' + x.postId, host).href,
             author: x.author,
-            pubDate: timezone(parseDate(x.createTime), +8),
+            pubDate: timezone(parseDate(x.createTime), 8),
             category: x.postTypeName,
         };
         return info;

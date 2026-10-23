@@ -18,14 +18,8 @@ export const route: Route = {
     handler,
     radar: [
         {
-            source: ['https://pkgs.alpinelinux.org/packages'],
-            target: (params, url) => {
-                const searchParams = new URL(url).searchParams;
-                const name = searchParams.get('name');
-                searchParams.delete('name');
-                const routeParams = searchParams.toString();
-                return `/alpinelinux/pkgs/${name}/${routeParams}`;
-            },
+            source: ['pkgs.alpinelinux.org/package/:branch/:repo/:arch/:name'],
+            target: '/pkgs/:name',
         },
     ],
     zh: {
@@ -75,7 +69,7 @@ async function handler(ctx: Context): Promise<Data> {
     query.append('name', name);
     const link = `https://pkgs.alpinelinux.org/packages?${query.toString()}`;
     const key = `alpinelinux:packages:${query.toString()}`;
-    const rowData = (await cache.tryGet(
+    const rowData = await cache.tryGet(
         key,
         async () => {
             const response = await got({
@@ -86,7 +80,7 @@ async function handler(ctx: Context): Promise<Data> {
         },
         config.cache.routeExpire,
         false
-    )) as RowData[];
+    );
 
     const items = rowData.map((e) => ({
         title: `${e.package}@${e.version}/${e.architecture}`,
@@ -94,7 +88,7 @@ async function handler(ctx: Context): Promise<Data> {
         link: `https://pkgs.alpinelinux.org${e.packageUrl}`,
         guid: `https://pkgs.alpinelinux.org${e.packageUrl}#${e.version}`,
         author: e.maintainer,
-        pubDate: parseDate(e.buildDate),
+        pubDate: e.buildDate ? parseDate(`${e.buildDate.replace(' ', 'T')}Z`) : undefined,
     }));
     return {
         title: `${name} - Alpine Linux packages`,

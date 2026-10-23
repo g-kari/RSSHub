@@ -1,4 +1,5 @@
 import { load } from 'cheerio';
+import pMap from 'p-map';
 
 import type { DataItem, Route } from '@/types';
 import cache from '@/utils/cache';
@@ -32,24 +33,22 @@ export const route: Route = {
 async function handler() {
     const html = await ofetch(NEWS_LINK);
     const $ = load(html);
-    const items = await Promise.all(
-        $('.list__side_border li')
-            .toArray()
-            .map((item) => {
-                const $item = $(item);
-                const link = `${ORIGIN}${$item.find('a').attr('href')!}`;
-                return cache.tryGet(link, async () => {
-                    const category = $item.find('p span').last().text();
-                    const title = $item.find('a').text();
-                    return {
-                        title,
-                        link,
-                        pubDate: timezone(parseDate($item.find('p span').first().text()), +9),
-                        category: [category],
-                        description: await getDescription(link),
-                    } as DataItem;
-                });
-            })
+    const items = await pMap(
+        $('.list__side_border li').toArray(),
+        async (item): Promise<DataItem> => {
+            const $item = $(item);
+            const link = `${ORIGIN}${$item.find('a').attr('href')!}`;
+            const category = $item.find('p span').last().text();
+            const title = $item.find('a').text();
+            return {
+                title,
+                link,
+                pubDate: timezone(parseDate($item.find('p span').first().text()), 9),
+                category: [category],
+                description: (await cache.tryGet(`${link}:description`, async () => ({ description: await getDescription(link) }))).description,
+            };
+        },
+        { concurrency: 3 }
     );
 
     return {
@@ -90,7 +89,7 @@ function normalizePhotoLists($, content) {
         const items = list
             .children('li')
             .toArray()
-            .flatMap((item) => {
+            .map((item) => {
                 const photoItem = $(item);
                 photoItem.find('img.for_sp').remove();
                 photoItem.find('img').each((__, image) => {
@@ -101,13 +100,13 @@ function normalizePhotoLists($, content) {
                         return;
                     }
 
-                    img.attr('src', new URL(src, ORIGIN).href);
                     img.removeAttr('class');
                 });
 
                 const html = photoItem.html();
-                return hasMeaningfulHtml(html) ? [`<div>${html!.trim()}</div>`] : [];
-            });
+                return hasMeaningfulHtml(html) ? `<div>${html!.trim()}</div>` : undefined;
+            })
+            .filter(Boolean);
 
         list.replaceWith(items.join('<br /><br />'));
     });

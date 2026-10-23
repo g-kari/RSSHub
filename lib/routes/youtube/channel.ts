@@ -3,7 +3,7 @@ import type { Route } from '@/types';
 
 import { getDataByChannelId as getDataByChannelIdGoogle } from './api/google';
 import { getDataByChannelId as getDataByChannelIdYoutubei } from './api/youtubei';
-import utils, { callApi } from './utils';
+import { callApi, isYouTubeChannelId } from './utils';
 
 export const route: Route = {
     path: '/channel/:id/:routeParams?',
@@ -62,9 +62,9 @@ async function handler(ctx) {
 
     // Get filterShorts parameter (default to true if not specified)
     const filterShortsStr = params.get('filterShorts');
-    const filterShorts = filterShortsStr === null || filterShortsStr === '' || filterShortsStr === 'true';
+    const filterShorts = [null, '', 'true'].includes(filterShortsStr);
 
-    if (!utils.isYouTubeChannelId(id)) {
+    if (!isYouTubeChannelId(id)) {
         throw new InvalidParameterError('Invalid YouTube channel ID. \nYou may want to use <code>/youtube/user/:id</code> instead.');
     }
 

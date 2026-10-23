@@ -1,9 +1,12 @@
 import { load } from 'cheerio';
+import pMap from 'p-map';
 
-import type { Route } from '@/types';
+import InvalidParameterError from '@/errors/types/invalid-parameter';
+import type { DataItem, Route } from '@/types';
 import cache from '@/utils/cache';
 import got from '@/utils/got';
 import { parseDate } from '@/utils/parse-date';
+import timezone from '@/utils/timezone';
 
 const baseUrl = 'http://ugs.hrbeu.edu.cn';
 
@@ -70,8 +73,120 @@ export const route: Route = {
     },
     radar: [
         {
-            source: ['ugs.hrbeu.edu.cn/:author/list.htm'],
-            target: '/ugs/news/:author',
+            source: ['ugs.hrbeu.edu.cn/2821/list.htm'],
+            target: '/ugs/news/gztz/all',
+        },
+        {
+            source: ['ugs.hrbeu.edu.cn/jwc/list.htm'],
+            target: '/ugs/news/jwc/all',
+        },
+        {
+            source: ['ugs.hrbeu.edu.cn/2847/list.htm'],
+            target: '/ugs/news/jwc/jxap',
+        },
+        {
+            source: ['ugs.hrbeu.edu.cn/2895/list.htm'],
+            target: '/ugs/news/jwc/ksgl',
+        },
+        {
+            source: ['ugs.hrbeu.edu.cn/2902/list.htm'],
+            target: '/ugs/news/jwc/xjgl',
+        },
+        {
+            source: ['ugs.hrbeu.edu.cn/2897/list.htm'],
+            target: '/ugs/news/jwc/wytk',
+        },
+        {
+            source: ['ugs.hrbeu.edu.cn/2901/list.htm'],
+            target: '/ugs/news/jwc/cjgl',
+        },
+        {
+            source: ['ugs.hrbeu.edu.cn/3206/list.htm'],
+            target: '/ugs/news/sjjxyjlc/all',
+        },
+        {
+            source: ['ugs.hrbeu.edu.cn/2847/list.htm'],
+            target: '/ugs/news/sjjxyjlc/syjx',
+        },
+        {
+            source: ['ugs.hrbeu.edu.cn/sysjs/list.htm'],
+            target: '/ugs/news/sjjxyjlc/sysjs',
+        },
+        {
+            source: ['ugs.hrbeu.edu.cn/2909/list.htm'],
+            target: '/ugs/news/sjjxyjlc/xwsx',
+        },
+        {
+            source: ['ugs.hrbeu.edu.cn/2910/list.htm'],
+            target: '/ugs/news/sjjxyjlc/xwlw',
+        },
+        {
+            source: ['ugs.hrbeu.edu.cn/2911/list.htm'],
+            target: '/ugs/news/sjjxyjlc/kcsj',
+        },
+        {
+            source: ['ugs.hrbeu.edu.cn/2913/list.htm'],
+            target: '/ugs/news/sjjxyjlc/cxcy',
+        },
+        {
+            source: ['ugs.hrbeu.edu.cn/xjjl/list.htm'],
+            target: '/ugs/news/sjjxyjlc/xjjl',
+        },
+        {
+            source: ['ugs.hrbeu.edu.cn/3207/list.htm'],
+            target: '/ugs/news/jypgc/all',
+        },
+        {
+            source: ['ugs.hrbeu.edu.cn/2916/list.htm'],
+            target: '/ugs/news/jypgc/jxyjyjxcg',
+        },
+        {
+            source: ['ugs.hrbeu.edu.cn/2917/list.htm'],
+            target: '/ugs/news/jypgc/zljk',
+        },
+        {
+            source: ['ugs.hrbeu.edu.cn/3208/list.htm'],
+            target: '/ugs/news/zyjsc/all',
+        },
+        {
+            source: ['ugs.hrbeu.edu.cn/2914/list.htm'],
+            target: '/ugs/news/zyjsc/zyyjcjs',
+        },
+        {
+            source: ['ugs.hrbeu.edu.cn/2925/list.htm'],
+            target: '/ugs/news/zyjsc/cgsyb',
+        },
+        {
+            source: ['ugs.hrbeu.edu.cn/2918/list.htm'],
+            target: '/ugs/news/zyjsc/jxmsyyxzjjs',
+        },
+        {
+            source: ['ugs.hrbeu.edu.cn/2919/list.htm'],
+            target: '/ugs/news/zyjsc/ktjs',
+        },
+        {
+            source: ['ugs.hrbeu.edu.cn/2920/list.htm'],
+            target: '/ugs/news/zyjsc/syjx',
+        },
+        {
+            source: ['ugs.hrbeu.edu.cn/3209/list.htm'],
+            target: '/ugs/news/gjdxswhszjd/all',
+        },
+        {
+            source: ['ugs.hrbeu.edu.cn/3210/list.htm'],
+            target: '/ugs/news/jsjxfzzx/all',
+        },
+        {
+            source: ['ugs.hrbeu.edu.cn/2915/list.htm'],
+            target: '/ugs/news/jsjxfzzx/jspx',
+        },
+        {
+            source: ['ugs.hrbeu.edu.cn/3211/list.htm'],
+            target: '/ugs/news/zhbgs/all',
+        },
+        {
+            source: ['ugs.hrbeu.edu.cn/lxkc/list.htm'],
+            target: '/ugs/news/zhbgs/lxkc',
         },
     ],
     name: '本科生院工作通知',
@@ -129,41 +244,43 @@ category 列表：
 };
 
 async function handler(ctx) {
-    const author = ctx.req.param('author') || 'gztz';
-    const category = ctx.req.param('category') || 'all';
+    const authorParam = ctx.req.param('author') || 'gztz';
+    const author = authorParam === 'sjjxyjlzx' ? 'sjjxyjlc' : authorParam;
+    const categoryParam = ctx.req.param('category') || 'all';
+    const category = author === 'zyjsc' && categoryParam === 'kcjs' ? 'ktjs' : categoryParam;
+    if (!Object.hasOwn(authorMap, author) || !Object.hasOwn(authorMap[author], category)) {
+        throw new InvalidParameterError('Invalid author or category: use the documented department and its category.');
+    }
     const link = baseUrl + authorMap[author][category] + '/list.htm';
-    const response = await got(link, {
-        headers: {
-            Referer: baseUrl,
-        },
-    });
+    const response = await got(link);
     const $ = load(response.data);
 
     const list = $('.wp_article_list_table .border9')
         .toArray()
-        .map((e) => {
-            e = $(e);
+        .map((e): DataItem & { link: string } => {
+            const $e = $(e);
             return {
-                title: e.find('a').attr('title'),
-                link: new URL(e.find('a').attr('href'), baseUrl).href,
-                pubDate: parseDate(e.find('.date').text()),
+                title: $e.find('a').attr('title')!,
+                link: new URL($e.find('a').attr('href')!, baseUrl).href,
+                pubDate: $e.find('.date').text() ? timezone(parseDate($e.find('.date').text()), 8) : undefined,
             };
         });
 
-    const out = await Promise.all(
-        list.map((item) =>
+    const out = await pMap(
+        list,
+        (item) =>
             cache.tryGet(item.link, async () => {
                 if (item.link.includes('.htm')) {
                     const response = await got(item.link);
                     const $ = load(response.data);
 
-                    item.description = $('.wp_articlecontent').html().trim();
+                    item.description = $('.wp_articlecontent').html();
                 } else {
                     item.description = '此链接为文件，请点击下载';
                 }
                 return item;
-            })
-        )
+            }),
+        { concurrency: 3 }
     );
 
     return {

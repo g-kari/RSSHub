@@ -1,44 +1,47 @@
 import { load } from 'cheerio';
 
-import type { Route } from '@/types';
+import type { DataItem, Language, Route } from '@/types';
 import cache from '@/utils/cache';
 import got from '@/utils/got';
 import { parseDate } from '@/utils/parse-date';
+import { getRouteLimit } from '@/utils/route-limit';
+import timezone from '@/utils/timezone';
 
 export const handler = async (ctx) => {
     const { category = 'sylm/xyxw' } = ctx.req.param();
-    const limit = ctx.req.query('limit') ? Number.parseInt(ctx.req.query('limit'), 10) : 11;
+    const limit = getRouteLimit(ctx, 11);
 
     const domain = 'mse.hust.edu.cn';
     const rootUrl = `https://${domain}`;
-    const currentUrl = new URL(`${category}.htm`, rootUrl).href;
+    const currentUrl = `${rootUrl}/${category}.htm`;
 
     const { data: response } = await got(currentUrl);
 
     const $ = load(response);
 
-    const language = $('html').prop('lang');
+    const language = $('html').prop('lang') as Language;
 
     let items = $('div.list ul li')
         .slice(0, limit)
         .toArray()
-        .map((item) => {
-            item = $(item);
+        .map((item): DataItem => {
+            const $item = $(item);
 
-            const a = item.find('a');
+            const a = $item.find('a');
+            const pubDate = parseDate($item.find('span.time').text().trim(), 'YYYY-MM-DD', true);
 
             return {
                 title: a.text(),
-                pubDate: parseDate(item.find('span.time').text()),
-                link: new URL(a.prop('href'), currentUrl).href,
+                pubDate: Number.isFinite(pubDate.getTime()) ? timezone(pubDate, 8) : undefined,
+                link: new URL(a.prop('href')!, currentUrl).href,
                 language,
             };
         });
 
     items = await Promise.all(
         items.map((item) =>
-            cache.tryGet(item.link, async () => {
-                if (!item.link.includes(domain)) {
+            cache.tryGet(item.link!, async () => {
+                if (!item.link!.includes(domain)) {
                     return item;
                 }
 
@@ -53,11 +56,12 @@ export const handler = async (ctx) => {
                     const data = $$(d).text();
 
                     if (!item.pubDate && data.startsWith('发布')) {
-                        const pubDate = data.split(/：/)?.pop();
-                        item.pubDate = pubDate ? parseDate(pubDate) : item.pubDate;
-                    } else if (!item.author && data.startsWith('作者')) {
-                        item.author = data.split(/：/)?.pop() ?? undefined;
-                    } else if (!item.author && data.startsWith('编辑')) {
+                        const date = data.split(/：/)?.pop()?.trim();
+                        const pubDate = date ? parseDate(date, ['YYYY-MM-DD', 'YYYY-MM-DD HH:mm:ss', 'YYYY-MM-DD HH:mm'], true) : undefined;
+                        if (pubDate && Number.isFinite(pubDate.getTime())) {
+                            item.pubDate = timezone(pubDate, 8);
+                        }
+                    } else if (!item.author && (data.startsWith('作者') || data.startsWith('编辑'))) {
                         item.author = data.split(/：/)?.pop() ?? undefined;
                     }
                 }
@@ -76,16 +80,15 @@ export const handler = async (ctx) => {
     );
 
     const title = $('meta[name="keywords"]').prop('content')?.replaceAll(',', ' - ') ?? $('title').text();
-    const image = new URL($('div.logo img').prop('src'), rootUrl).href;
+    const image = new URL($('div.logo img').prop('src')!, rootUrl).href;
 
     return {
         title,
         description: title.split(/-/).pop()?.trim(),
         link: currentUrl,
         item: items,
-        allowEmpty: true,
         image,
-        author: title.split(/-/)[0]?.trim(),
+        author: title.split(/-/, 1)[0]?.trim(),
         language,
     };
 };
@@ -213,12 +216,8 @@ export const route: Route = {
     },
     radar: [
         {
-            source: ['mse.hust.edu.cn/:category?'],
-            target: (params) => {
-                const category = params.category;
-
-                return `/hust/mse${category ? `/${category}` : ''}`;
-            },
+            source: ['mse.hust.edu.cn/', 'mse.hust.edu.cn/sylm/xyxw.htm'],
+            target: '/mse/sylm/xyxw',
         },
         {
             title: '首页栏目 - 学院新闻',

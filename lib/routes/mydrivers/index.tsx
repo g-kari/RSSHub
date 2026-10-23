@@ -53,12 +53,13 @@ async function handler(ctx) {
 
     let newTitle = '';
 
-    if (!/^(\w+\/\w+)$/.test(category)) {
+    if (!/^\w+\/\w+$/.test(category)) {
         newTitle = `${title} - ${Object.hasOwn(categories, category) ? categories[category] : categories[Object.keys(categories)[0]]}`;
         category = `ac/${category}`;
     }
 
-    const limit = ctx.req.query('limit') ? Number.parseInt(ctx.req.query('limit'), 10) : 20;
+    const requestedLimit = Number(ctx.req.query('limit'));
+    const limit = Number.isSafeInteger(requestedLimit) && requestedLimit > 0 ? requestedLimit : 20;
 
     const queryString = convertToQueryString(category);
     const currentUrl = new URL(`newsclass.aspx${queryString}`, rootUrl).href;
@@ -73,24 +74,24 @@ async function handler(ctx) {
         .slice(0, limit)
         .toArray()
         .map((item) => {
-            item = $(item);
+            const $item = $(item);
 
             return {
-                title: item.find('div.news_title').text(),
-                link: new URL(item.find('div.news_title span.newst a').prop('href'), rootUrl).href,
+                title: $item.find('div.news_title').text(),
+                link: new URL($item.find('div.news_title span.newst a').prop('href')!, rootUrl).href,
                 description: renderToString(
                     <>
-                        {item.find('a.newsimg img').prop('src') ? (
+                        {$item.find('a.newsimg img').prop('src') ? (
                             <figure>
-                                <img src={item.find('a.newsimg img').prop('src')} />
+                                <img src={$item.find('a.newsimg img').prop('src')} />
                             </figure>
                         ) : null}
                     </>
                 ),
-                author: item.find('p.tname').text(),
-                guid: item.prop('data-id'),
-                pubDate: timezone(parseDate(item.find('p.ttime').text()), +8),
-                comments: item.find('a.tpinglun').text() ? Number.parseInt(item.find('a.tpinglun').text(), 10) : 0,
+                author: $item.find('p.tname').text(),
+                guid: $item.prop('data-id'),
+                pubDate: timezone(parseDate($item.find('p.ttime').text()), 8),
+                comments: $item.find('a.tpinglun').text() ? Number($item.find('a.tpinglun').text()) : 0,
             };
         });
 
@@ -98,7 +99,7 @@ async function handler(ctx) {
 
     return {
         ...(await getInfo(currentUrl)),
-        ...(newTitle ? { title: newTitle } : {}),
+        ...(newTitle && { title: newTitle }),
         item: items,
     };
 }

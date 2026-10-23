@@ -1,6 +1,6 @@
 import type { Route } from '@/types';
-import cache from '@/utils/cache';
 import got from '@/utils/got';
+import { getRouteLimit } from '@/utils/route-limit';
 
 import { apiSearchRootUrl, buildFeedMetadata, buildHuxiuRouteTitlePrefix, generateSignature, processItems, rootUrl, siteTitle } from './util';
 
@@ -30,7 +30,7 @@ export const route: Route = {
 
 async function handler(ctx) {
     const keyword = ctx.req.param('keyword');
-    const limit = ctx.req.query('limit') ? Number.parseInt(ctx.req.query('limit'), 10) : 20;
+    const limit = getRouteLimit(ctx, 20);
     const baseTitle = siteTitle;
 
     const apiUrl = new URL('api/article', apiSearchRootUrl).href;
@@ -48,7 +48,7 @@ async function handler(ctx) {
         },
     });
 
-    const items = await processItems(response.data.datalist, limit, cache.tryGet);
+    const items = await processItems(response.data.datalist, limit);
 
     const data = buildFeedMetadata({
         title: `搜索结果-${keyword}`,

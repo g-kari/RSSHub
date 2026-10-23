@@ -1,4 +1,5 @@
 import { config } from '@/config';
+import type { DataItem } from '@/types';
 import cache from '@/utils/cache';
 import ofetch from '@/utils/ofetch';
 import { parseDate } from '@/utils/parse-date';
@@ -6,7 +7,7 @@ import { parseDate } from '@/utils/parse-date';
 const contentStreamUrl = 'https://news.ainvest.com/news-w-ds-hxcmp-content-stream/content_stream/api/stream_item/v1/query_content_stream';
 const contentPageUrl = 'https://news.ainvest.com/content-page/v1/page';
 
-const normalizeItem = (item) => ({
+const normalizeItem = (item): DataItem & { seoKey?: string } => ({
     title: item.title,
     link: item.h5_url,
     pubDate: parseDate(item.ctime, 'X'),
@@ -16,7 +17,7 @@ const normalizeItem = (item) => ({
     seoKey: item.seo_key,
 });
 
-export const fetchContentStream = (streamId, limit) =>
+const fetchContentStream = (streamId, limit) =>
     cache.tryGet(
         `ainvest:news:${streamId}:${limit}`,
         async () => {
@@ -36,13 +37,15 @@ export const fetchContentStream = (streamId, limit) =>
 
 export const fetchContentItems = async (streamIds, limit) => {
     const streams = await Promise.all(streamIds.map((streamId) => fetchContentStream(streamId, limit)));
-    const list = streams.flat().map((item) => normalizeItem(item));
+    const list = streams
+        .flat()
+        .slice(0, limit)
+        .map((item) => normalizeItem(item));
 
     return Promise.all(
         list.map((item) =>
-            cache.tryGet(item.link, async () => {
-                const response = await ofetch(`${contentPageUrl}/${item.seoKey}`);
-                const { data } = response;
+            cache.tryGet(item.link!, async () => {
+                const { data } = await ofetch(`${contentPageUrl}/${item.seoKey}`);
 
                 item.description = data.pageInfo.structuredContent.map((c) => c.content).join('');
                 item.image = data.contentInfo.coverImage;

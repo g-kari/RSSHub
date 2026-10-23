@@ -1,6 +1,7 @@
 import { load } from 'cheerio';
+import pMap from 'p-map';
 
-import type { Route } from '@/types';
+import type { DataItem, Route } from '@/types';
 import { ViewType } from '@/types';
 import cache from '@/utils/cache';
 import ofetch from '@/utils/ofetch';
@@ -51,11 +52,11 @@ async function handler(ctx) {
 
     const list = $('div.col_news_con li.news')
         .toArray()
-        .map((item) => {
+        .map((item): DataItem & { link: string } => {
             const element = $(item);
-            const link = new URL(element.find('a').attr('href'), rootUrl).href;
-            const pubDateText = element.find('span.news_meta').text().trim();
-            const pubDate = pubDateText ? timezone(parseDate(pubDateText), +8) : null;
+            const link = new URL(element.find('a').attr('href')!, rootUrl).href;
+            const pubDateText = element.find('span.news_meta').text();
+            const pubDate = pubDateText ? timezone(parseDate(pubDateText), 8) : null;
             return {
                 title: element.find('a').text().trim(),
                 pubDate,
@@ -63,8 +64,9 @@ async function handler(ctx) {
             };
         });
 
-    const items = await Promise.all(
-        list.map((item) =>
+    const items = await pMap(
+        list,
+        (item) =>
             cache.tryGet(item.link, async () => {
                 if (!item.link.startsWith(rootUrl)) {
                     item.description = '本文需跳转，请点击原文链接后阅读';
@@ -77,7 +79,7 @@ async function handler(ctx) {
 
                 content.find('[style]').removeAttr('style');
                 content.find('font').contents().unwrap();
-                content.html(content.html()?.replaceAll('&nbsp;', ''));
+                content.html(content.html()?.replaceAll('&nbsp;', '') ?? '');
                 content.find('[align]').removeAttr('align');
 
                 const author = $('span.arti_publisher').text().replace('发布者：', '').trim();
@@ -89,14 +91,14 @@ async function handler(ctx) {
                     description: content.html(),
                     author,
                 };
-            })
-        )
+            }),
+        { concurrency: 3 }
     );
 
     return {
         title: `${bigTitle} - 哈尔滨理工大学计算机学院`,
         link: columnUrl,
-        language: 'zh-CN',
+        language: 'zh-CN' as const,
         item: items,
     };
 }

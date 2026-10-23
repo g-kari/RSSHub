@@ -1,12 +1,13 @@
-import { load } from 'cheerio';
+import { type Cheerio, type CheerioAPI, load } from 'cheerio';
+import { type AnyNode, cloneNode, Document } from 'domhandler';
+import pMap from 'p-map';
 
-import type { Route } from '@/types';
+import type { DataItem, Route } from '@/types';
 import cache from '@/utils/cache';
 import got from '@/utils/got';
 import { parseDate } from '@/utils/parse-date';
 
 const baseUrl = 'https://gr.xidian.edu.cn';
-
 const struct = {
     home_zxdt: {
         selector: {
@@ -172,7 +173,6 @@ const struct = {
         path: '/xwsy/zlxz',
     },
 };
-
 export const route: Route = {
     path: '/gr/:category?',
     categories: ['university'],
@@ -223,19 +223,12 @@ export const route: Route = {
         },
     ],
 };
-
 async function handler(ctx) {
     const { category = 'home_tzgg1' } = ctx.req.param();
     const url = `${baseUrl}/${struct[category].path}.htm`;
-    const response = await got(url, {
-        headers: {
-            referer: baseUrl,
-        },
-    });
-
+    const response = await got(url);
     const $ = load(response.data);
-
-    if (category === 'yyjs_jbqk' || category === 'yyjs_jbqk1' || category === 'yyjs_jbqk2' || category === 'yyjs_jbqk4') {
+    if (['yyjs_jbqk', 'yyjs_jbqk1', 'yyjs_jbqk2', 'yyjs_jbqk4'].includes(category)) {
         return {
             title: $('.right-bt-left').text(),
             link: url,
@@ -247,38 +240,57 @@ async function handler(ctx) {
                 },
             ],
         };
-    } else {
-        let items = $(struct[category].selector.list)
-            .toArray()
-            .map((item) => {
-                item = $(item);
-                return {
-                    title: item.find('a').text(),
-                    link: new URL(item.find('a').attr('href'), baseUrl).href,
-                    pubDate: parseDate(item.find('span').text()),
-                };
-            });
-
-        items = await Promise.all(
-            items.map((item) =>
-                cache.tryGet(item.link, async () => {
+    }
+    let items = $(struct[category].selector.list)
+        .toArray()
+        .map((item): DataItem => {
+            const $item = $(item);
+            return {
+                title: $item.find('a').text(),
+                link: new URL($item.find('a').attr('href')!, baseUrl).href,
+                pubDate: parseDate($item.find('span').text()),
+            };
+        });
+    items = await pMap(
+        items,
+        (item) =>
+            mapResolvedValue(
+                cache.tryGet(`xidian:gr:content:v2:${item.link}`, async () => {
                     const detailResponse = await got(item.link, {
                         headers: {
                             referer: url,
                         },
                     });
                     const content = load(detailResponse.data);
-                    content('.content-sxt').remove();
-                    item.description = content('[name="_newscontent_fromname"]').html();
-                    return item;
-                })
-            )
-        );
-
-        return {
-            title: $('title').text(),
-            link: url,
-            item: items,
-        };
+                    const body = content('[name="_newscontent_fromname"] .v_news_content').first();
+                    content('[name="_newscontent_fromname"] a[href*="download.jsp"]')
+                        .filter((_, attachment) => !content(attachment).closest('.v_news_content').length)
+                        .each((_, attachment) => {
+                            const attachmentWrapper1 = content('<p/>');
+                            attachmentWrapper1.append(copyContent(content(attachment), content));
+                            body.append(attachmentWrapper1);
+                        });
+                    return { description: body.html() ?? undefined };
+                }),
+                (detail) => ({ ...item, ...detail })
+            ),
+        { concurrency: 3, stopOnError: false }
+    );
+    return {
+        title: $('title').text(),
+        link: url,
+        item: items,
+    };
+}
+async function mapResolvedValue<T, U>(promise: Promise<T>, mapper: (value: T) => U | Promise<U>): Promise<U> {
+    const value = await promise;
+    return mapper(value);
+}
+function copyContent<T extends AnyNode>(selection: Cheerio<T>, $: CheerioAPI): Cheerio<T> {
+    const nodes = selection.toArray().map((node) => cloneNode(node, true));
+    const root = new Document(nodes);
+    for (const node of nodes) {
+        node.parent = root;
     }
+    return $(nodes);
 }

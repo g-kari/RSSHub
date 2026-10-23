@@ -1,8 +1,10 @@
 import type { Context } from 'hono';
 
-import type { Route } from '@/types';
+import InvalidParameterError from '@/errors/types/invalid-parameter';
+import type { Data, Route } from '@/types';
 import ofetch from '@/utils/ofetch';
 import { parseDate } from '@/utils/parse-date';
+import { getRouteLimit } from '@/utils/route-limit';
 
 import { cnNewsHander } from './news-cn';
 
@@ -157,18 +159,22 @@ export const route: Route = {
     url: 'fcbayern.com',
 };
 
-async function handler(ctx: Context) {
+async function handler(ctx: Context): Promise<Data> {
     const { language = 'en' } = ctx.req.param();
-    const limit = ctx.req.query('limit') ? Number.parseInt(ctx.req.query('limit')!, 10) : 20;
+    if (language !== 'zh' && !Object.hasOwn(languages, language)) {
+        throw new InvalidParameterError('language must be en, es, de, or zh');
+    }
+    const limit = Math.max(20, getRouteLimit(ctx, 20));
 
     if (language === 'zh') {
         return cnNewsHander(limit);
     }
 
     const baseUrl = 'https://fcbayern.com';
-    const channelId = languages[language] ?? languages.en;
+    const languageKey = language === 'es' ? 'es' : language === 'de' ? 'de' : 'en';
+    const channelId = languages[languageKey];
 
-    const response = await ofetch(`${baseUrl}/graphql`, {
+    const response = await ofetch('https://app.fcbayern.com/graphql', {
         method: 'POST',
         query: {
             client: 'fcbwebsite',
@@ -199,8 +205,8 @@ async function handler(ctx: Context) {
 
     return {
         title: 'FC Bayern München - News',
-        link: `${baseUrl}/${language}/news`,
-        language,
+        link: `${baseUrl}/${languageKey}/news`,
+        language: languageKey,
         image: `${baseUrl}/favicon.ico`,
         item: items,
     };

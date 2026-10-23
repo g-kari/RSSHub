@@ -1,7 +1,7 @@
 import { load } from 'cheerio';
 
 import InvalidParameterError from '@/errors/types/invalid-parameter';
-import type { Data, Route } from '@/types';
+import type { Data, Language, Route } from '@/types';
 import { ViewType } from '@/types';
 import got from '@/utils/got';
 import { isValidHost } from '@/utils/valid-host';
@@ -25,12 +25,12 @@ export const route: Route = {
                 { value: 'es', label: 'Español' },
                 { value: 'fr', label: 'Français' },
                 { value: 'it', label: 'Italiano' },
-                { value: 'ja', label: '日本語' },
+                { value: 'jp', label: '日本語' },
                 { value: 'pt', label: 'Português' },
                 { value: 'pl', label: 'Polski' },
                 { value: 'rt', label: 'Русский' },
                 { value: 'nl', label: 'Dutch' },
-                { value: 'cs', label: 'Czech' },
+                { value: 'cz', label: 'Czech' },
                 { value: 'cn', label: '中文（简体）' },
             ],
             default: 'www',
@@ -104,7 +104,7 @@ async function handler(ctx): Promise<Data> {
         description: $('section.aboutMeSection').text().trim(),
         link,
         image: $('#getAvatar').attr('src'),
-        language: $('html').attr('lang') as any,
+        language: $('html').attr('lang') as Language | undefined,
         item: items,
     };
 }

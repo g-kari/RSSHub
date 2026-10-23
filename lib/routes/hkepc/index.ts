@@ -1,7 +1,6 @@
-/* eslint-disable unicorn/prefer-code-point */
 import { load } from 'cheerio';
 
-import type { Route } from '@/types';
+import type { DataItem, Route } from '@/types';
 import cache from '@/utils/cache';
 import got from '@/utils/got';
 import { parseDate } from '@/utils/parse-date';
@@ -28,7 +27,7 @@ export const route: Route = {
             target: '',
         },
     ],
-    name: 'HKEPC 电脑领域',
+    name: '电脑领域',
     maintainers: ['TonyRL'],
     handler,
     url: 'hkepc.com/',
@@ -51,14 +50,14 @@ async function handler(ctx) {
     const list = $(categoryMap[category].selector)
         .find('a')
         .toArray()
-        .map((item) => ({
+        .map((item): DataItem & { link: string } => ({
             title: $(item).text(),
             link: baseUrl + $(item).attr('href'),
         }));
 
     const items = await Promise.all(
-        list.map((item) =>
-            cache.tryGet(item.link, async () => {
+        list.map(async (item) => {
+            const details = await cache.tryGet(`hkepc:article:${item.link}`, async () => {
                 const { data: response } = await got(item.link, {
                     headers: {
                         Referer: baseUrl,
@@ -84,7 +83,7 @@ async function handler(ctx) {
                             return $('#view').html();
                         })
                     );
-                    content.append(pages);
+                    content.append(...pages.filter((page) => page !== null));
                 }
 
                 // remove unwanted elements
@@ -97,7 +96,10 @@ async function handler(ctx) {
                 // Taken from /caixin/blog.js
                 content
                     .find('#view > p')
-                    .filter((_, e) => e.children[0]?.data === String.fromCharCode(160))
+                    .filter((_, e) => {
+                        const [firstChild] = e.children;
+                        return firstChild?.type === 'text' && firstChild.data === String.fromCodePoint(160);
+                    })
                     .remove();
 
                 // fix lazyload image
@@ -112,19 +114,22 @@ async function handler(ctx) {
                     .toArray()
                     .map((e) => $(e).text().trim());
                 item.description = content.html();
-                item.pubDate = timezone(parseDate($('.publishDate').text()), +8);
+                const sourceDate = $('.publishDate').text();
+                const pubDate = sourceDate ? parseDate(sourceDate) : undefined;
+                item.pubDate = pubDate && Number.isFinite(pubDate.getTime()) ? timezone(pubDate, 8) : undefined;
                 item.guid = item.link.slice(0, item.link.lastIndexOf('/'));
 
-                return item;
-            })
-        )
+                return { author: item.author, category: item.category, description: item.description, pubDate: item.pubDate, guid: item.guid };
+            });
+            return { ...item, ...details };
+        })
     );
 
     return {
         title: `電腦領域 HKEPC${categoryMap[category].feedSuffix}`,
-        link: `https://www.hkepc.com/${category}`,
+        link: categoryMap[category].url,
         description: '電腦領域 HKEPC Hardware - 全港 No.1 PC網站',
-        language: 'zh-hk',
+        language: 'zh-HK' as const,
         item: items,
     };
 }

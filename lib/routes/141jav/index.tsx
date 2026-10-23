@@ -2,13 +2,15 @@ import { load } from 'cheerio';
 import { renderToString } from 'hono/jsx/dom/server';
 
 import type { Route } from '@/types';
-import { getSubPath } from '@/utils/common-utils';
 import got from '@/utils/got';
 import { parseDate } from '@/utils/parse-date';
 
+const rootUrl = 'https://www.141jav.com';
+
 export const route: Route = {
-    path: '/:type/:keyword{.*}?',
+    path: '/:type/:keyword{.+}?',
     categories: ['multimedia'],
+    example: '/141jav/popular/30',
     name: '通用',
     maintainers: ['cgkings', 'nczitzk'],
     parameters: { type: '类型，可查看下表的类型说明', keyword: '关键词，可查看下表的关键词说明' },
@@ -48,11 +50,11 @@ export const route: Route = {
   \`date\` 类型的关键词必须填写 **日期 (年 / 月 / 日)**`,
     features: {
         nsfw: true,
+        supportBT: true,
     },
 };
 
 async function handler(ctx) {
-    const rootUrl = 'https://www.141jav.com';
     const type = ctx.req.param('type');
     const keyword = ctx.req.param('keyword') ?? '';
 
@@ -65,46 +67,42 @@ async function handler(ctx) {
 
     const $ = load(response.data);
 
-    if (getSubPath(ctx) === '/') {
-        ctx.set('redirect', `/141jav${$('.overview').first().attr('href')}`);
-        return;
-    }
-
     const items = $('.columns')
         .toArray()
         .map((item) => {
-            item = $(item);
+            const $item = $(item);
 
-            const id = item.find('.title a').text();
-            const size = item.find('.title span').text();
-            const pubDate = item.find('.subtitle a').attr('href').split('/date/').pop();
-            const description = item.find('.has-text-grey-dark').text();
-            const actresses = item
+            const id = $item.find('.title a').text();
+            const size = $item.find('.title span').text();
+            const pubDate = $item.find('.subtitle a').attr('href')!.split('/date/').pop();
+            const description = $item.find('.has-text-grey-dark').text();
+            const actresses = $item
                 .find('.panel-block')
                 .toArray()
                 .map((a) => $(a).text().trim());
-            const tags = item
+            const tags = $item
                 .find('.tag')
                 .toArray()
                 .map((t) => $(t).text().trim());
-            const magnet = item.find('a[title="Magnet torrent"]').attr('href');
-            const link = item.find('a[title="Download .torrent"]').attr('href');
-            const image = item.find('.image').attr('src');
+            const magnet = $item.find('a[title="Magnet torrent"]').attr('href');
+            const torrentPath = $item.find('a[title="Download .torrent"]').attr('href');
+            const link = torrentPath ? new URL(torrentPath, rootUrl).href : undefined;
+            const image = $item.find('.image').attr('src');
 
             return {
                 title: `${id} ${size}`,
-                pubDate: parseDate(pubDate, 'YYYY/MM/DD'),
-                link: new URL(item.find('a').first().attr('href'), rootUrl).href,
-                description: renderToString(<JavDescription image={image} id={id} size={size} pubDate={pubDate} description={description} actresses={actresses} tags={tags} magnet={magnet} link={link} />),
+                pubDate: parseDate(pubDate!, 'YYYY/MM/DD'),
+                link: new URL($item.find('a').first().attr('href')!, rootUrl).href,
+                description: renderToString(<JavDescription image={image} id={id} size={size} pubDate={pubDate!} description={description} actresses={actresses} tags={tags} magnet={magnet} link={link} />),
                 author: actresses.join(', '),
                 category: [...tags, ...actresses],
                 enclosure_type: 'application/x-bittorrent',
-                enclosure_url: magnet,
+                enclosure_url: link,
             };
         });
 
     return {
-        title: `141JAV - ${$('title').text().split('-')[0].trim()}`,
+        title: `141JAV - ${$('title').text().split('-', 1)[0].trim()}`,
         link: currentUrl,
         item: items,
     };
@@ -156,7 +154,7 @@ const JavDescription = ({
                     <td>
                         {actresses.map((actress) => (
                             <>
-                                <a href={`/actress/${actress}`}>{actress}</a>&nbsp;
+                                <a href={`${rootUrl}/actress/${encodeURIComponent(actress)}`}>{actress}</a>&nbsp;
                             </>
                         ))}
                     </td>
@@ -166,7 +164,7 @@ const JavDescription = ({
                     <td>
                         {tags.map((tag) => (
                             <>
-                                <a href={`/tag/${tag}`}>{tag}</a>&nbsp;
+                                <a href={`${rootUrl}/tag/${encodeURIComponent(tag)}`}>{tag}</a>&nbsp;
                             </>
                         ))}
                     </td>

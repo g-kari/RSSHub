@@ -2,8 +2,9 @@ import type { CheerioAPI } from 'cheerio';
 import { load } from 'cheerio';
 import type { Context } from 'hono';
 import MarkdownIt from 'markdown-it';
+import pMap from 'p-map';
 
-import type { Data, DataItem, Route } from '@/types';
+import type { Data, DataItem, Language, Route } from '@/types';
 import { ViewType } from '@/types';
 import cache from '@/utils/cache';
 import ofetch from '@/utils/ofetch';
@@ -38,6 +39,8 @@ const findNamesByUuids = (data: any[], uuids: string[]): string[] => {
     return uuids.flatMap((uuid) => allItems.filter((item) => item.uuid === uuid || item.name === uuid).map((item) => item.name)).filter(Boolean);
 };
 
+const resolveMediaUrl = (source: string | undefined) => (source ? new URL(source, 'https://image.lceda.cn').href : undefined);
+
 const md = MarkdownIt({
     html: true,
     linkify: true,
@@ -45,7 +48,8 @@ const md = MarkdownIt({
 
 export const handler = async (ctx: Context): Promise<Data> => {
     const { type = 'new', origin = 'all', projectTag } = ctx.req.param();
-    const limit: number = Number.parseInt(ctx.req.query('limit') ?? '15', 10);
+    const requestedLimit = Number(ctx.req.query('limit') ?? 15);
+    const limit = Number.isFinite(requestedLimit) && requestedLimit >= 1 ? Math.floor(requestedLimit) : 15;
 
     const baseUrl = 'https://oshwhub.com';
     const apiUrl: string = new URL('api/project', baseUrl).href;
@@ -54,7 +58,7 @@ export const handler = async (ctx: Context): Promise<Data> => {
 
     const targetResponse = await ofetch(targetUrl);
     const $: CheerioAPI = load(targetResponse);
-    const language = $('html').attr('lang') ?? 'zh';
+    const language = ($('html').attr('lang') ?? 'zh') as Language;
 
     const tagResponse = await ofetch(apiTagUrl);
     const projectTagsData = tagResponse.result;
@@ -72,7 +76,7 @@ export const handler = async (ctx: Context): Promise<Data> => {
 
     let items: DataItem[] = response.result.lists.slice(0, limit).map((item): DataItem => {
         const title: string = item.name;
-        const image: string | undefined = item.thumb?.startsWith('https:') ? item.thumb : `https:${item.thumb}`;
+        const image: string | undefined = resolveMediaUrl(item.thumb);
         const description: string | undefined = renderDescription({
             images: image
                 ? [
@@ -86,13 +90,14 @@ export const handler = async (ctx: Context): Promise<Data> => {
         });
         const pubDate: number | string = item.created_at;
         const linkUrl: string | undefined = item.path;
-        const categories: string[] = [originOptions.find((opt) => opt.value === item.origin)?.label ?? undefined].filter(Boolean) as string[];
+        const originLabel: string | undefined = originOptions.find((opt) => opt.value === item.origin)?.label;
+        const categories: string[] = originLabel ? [originLabel] : [];
         const authors: DataItem['author'] = item.owner
             ? [
                   {
                       name: item.owner.name,
                       url: new URL(item.owner.username, baseUrl).href,
-                      avatar: item.owner.avatar ? `https:${item.owner.avatar}` : undefined,
+                      avatar: resolveMediaUrl(item.owner.avatar),
                   },
               ]
             : undefined;
@@ -103,8 +108,8 @@ export const handler = async (ctx: Context): Promise<Data> => {
             title,
             description,
             pubDate: pubDate ? parseDate(pubDate) : undefined,
-            link: linkUrl ? new URL(item.link, baseUrl).href : undefined,
-            categories,
+            link: linkUrl ? new URL(linkUrl, baseUrl).href : undefined,
+            category: categories,
             author: authors,
             guid,
             id: guid,
@@ -116,20 +121,20 @@ export const handler = async (ctx: Context): Promise<Data> => {
             banner: image,
             updated: updated ? parseDate(updated) : undefined,
             language,
-            uuid: item.uuid,
         };
 
         return processedItem;
     });
 
-    items = await Promise.all(
-        items.map((item) => {
+    items = await pMap(
+        items,
+        (item) => {
             if (!item.link || !item.guid) {
                 return item;
             }
 
             return cache.tryGet(item.link, async (): Promise<DataItem> => {
-                const projectId = item.guid.replace(/^oshwhub-/, '');
+                const projectId = item.guid!.replace(/^oshwhub-/, '');
                 const detailUrl = new URL(`api/project/${projectId}`, baseUrl).href;
                 const detailResponse = await ofetch(detailUrl);
 
@@ -141,21 +146,21 @@ export const handler = async (ctx: Context): Promise<Data> => {
                 const origin: string | undefined = originOptions.find((opt) => opt.value === result.origin)?.label ?? undefined;
                 const tags: string[] = findNamesByUuids(projectTagsData, result.project_tags ?? []);
 
-                const categories: string[] = [...new Set([...(item.category ?? []), origin ?? undefined, ...tags, result.license].filter(Boolean) as string[])];
-                const authors: DataItem['author'] = [
-                    ...new Map(
-                        [result.owner, result.creator, ...result.members].map((author) => {
-                            const item = {
-                                name: author.nickname,
-                                url: new URL(author.username, baseUrl).href,
-                                avatar: author.avatar ? `https:${author.avatar}` : undefined,
-                            };
-                            return [`${item.name}|${item.url}`, item];
-                        })
-                    ).values(),
-                ];
+                const categories: string[] = [...new Set([...(item.category ?? []), origin ?? undefined, ...tags, result.license].filter((value): value is string => Boolean(value)))];
+                const authors: DataItem['author'] = new Map(
+                    [result.owner, result.creator, ...result.members].map((author) => {
+                        const item = {
+                            name: author.nickname,
+                            url: new URL(author.username, baseUrl).href,
+                            avatar: resolveMediaUrl(author.avatar),
+                        };
+                        return [`${item.name}|${item.url}`, item];
+                    })
+                )
+                    .values()
+                    .toArray();
                 const guid: string = result.uuid ? `oshwhub-${result.uuid}` : item.guid || '';
-                const image: string | undefined = result.thumb?.startsWith('https:') ? result.thumb : `https:${result.thumb}`;
+                const image: string | undefined = resolveMediaUrl(result.thumb);
                 const upDatedStr: string | undefined = result.updated_at || pubDateStr;
 
                 const attachments = result.attachments;
@@ -204,7 +209,7 @@ export const handler = async (ctx: Context): Promise<Data> => {
                 const attachment = attachments?.[0];
 
                 if (attachment && attachment.src) {
-                    const enclosureUrl: string | undefined = `https://image.lceda.cn${attachment.src}`;
+                    const enclosureUrl: string | undefined = resolveMediaUrl(attachment.src);
                     const enclosureType: string = attachment.mime;
                     const enclosureTitle: string = attachment.name;
                     const enclosureLength = Number(attachment.size);
@@ -223,7 +228,8 @@ export const handler = async (ctx: Context): Promise<Data> => {
                     ...processedItem,
                 };
             });
-        })
+        },
+        { concurrency: 3 }
     );
 
     const title: string = $('title').text();

@@ -1,5 +1,6 @@
-import type { Route } from '@/types';
+import type { Data, Route } from '@/types';
 import { ViewType } from '@/types';
+import { getRouteLimit } from '@/utils/route-limit';
 
 import { baseUrl, getData, getList, variables } from './utils.js';
 
@@ -107,6 +108,7 @@ const query = /* GraphQL */ `
         sharedPost {
             id
             title
+            summary
             image
             readTime
             permalink
@@ -188,22 +190,17 @@ const query = /* GraphQL */ `
 `;
 
 export const route: Route = {
-    path: '/squads/:squads/:innerSharedContent?',
+    path: '/squads/:squads',
     example: '/daily/squads/watercooler',
     view: ViewType.Articles,
-    parameters: {
-        innerSharedContent: {
-            description: 'Where to Fetch inner Shared Posts instead of original',
-            default: 'false',
-            options: [
-                { value: 'false', label: 'False' },
-                { value: 'true', label: 'True' },
-            ],
-        },
-    },
     radar: [
         {
+            source: ['daily.dev/squads/:squads'],
+            target: '/squads/:squads',
+        },
+        {
             source: ['app.daily.dev/squads/:squads'],
+            target: '/squads/:squads',
         },
     ],
     name: 'Squads',
@@ -212,9 +209,9 @@ export const route: Route = {
     url: 'app.daily.dev/squads/discover',
 };
 
-async function handler(ctx) {
-    const limit = ctx.req.query('limit') ? Number.parseInt(ctx.req.query('limit'), 10) : 20;
-    const innerSharedContent = ctx.req.param('innerSharedContent') ? JSON.parse(ctx.req.param('innerSharedContent')) : false;
+async function handler(ctx): Promise<Data> {
+    const requestedLimit = getRouteLimit(ctx, 20);
+    const limit = ctx.req.query('sorted') === 'false' ? requestedLimit : Math.max(20, requestedLimit);
     const squads = ctx.req.param('squads');
 
     const link = `${baseUrl}/squads/${squads}`;
@@ -239,7 +236,7 @@ async function handler(ctx) {
             first: limit,
         },
     });
-    const items = getList(data, innerSharedContent, true);
+    const items = getList(data);
 
     return {
         title: `${name} - daily.dev`,

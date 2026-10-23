@@ -1,10 +1,19 @@
 import { load } from 'cheerio';
+import pMap from 'p-map';
 
-import type { Route } from '@/types';
+import type { DataItem, Route } from '@/types';
 import cache from '@/utils/cache';
 import got from '@/utils/got';
 import { parseDate } from '@/utils/parse-date';
 import timezone from '@/utils/timezone';
+
+function parsePublicationDate(value?: string) {
+    if (!value?.trim()) {
+        return;
+    }
+    const date = parseDate(value);
+    return Number.isNaN(date.getTime()) ? undefined : timezone(date, 8);
+}
 
 export const route: Route = {
     path: '/today/:category',
@@ -41,48 +50,39 @@ async function handler(ctx) {
     const host = 'https://today.hit.edu.cn';
     const category = ctx.req.param('category');
 
-    const response = await got(host + '/category/' + category, {
-        headers: {
-            Referer: host,
-        },
-    });
+    const response = await got(host + '/category/' + category);
 
     const $ = load(response.data);
     const list = $('.paragraph li')
         .toArray()
-        .map((e) => ({
-            link: new URL($('span span a', e).attr('href'), host).href,
+        .map((e): DataItem & { link: string } => ({
+            link: new URL($('span span a', e).attr('href')!, host).href,
             title: $('span span a', e).text(),
             author: $('div a', e).attr('hreflang', 'zh-hans').text(),
-            pubDate: timezone(parseDate($('span span a', e).attr('href').split('/').slice(-4, -1).join(','), 'YYYYMMDD'), 8),
+            pubDate: parsePublicationDate(
+                $('span span a', e)
+                    .attr('href')
+                    ?.match(/\/article\/(\d{4})\/(\d{1,2})\/(\d{1,2})\//)
+                    ?.slice(1)
+                    .join('-')
+            ),
         }));
 
-    const out = await Promise.all(
-        list.map((item) =>
-            cache.tryGet(item.link, async () => {
-                try {
-                    const response = await got(item.link, {
-                        headers: {
-                            Referer: host,
-                        },
-                    });
-
-                    const $ = load(response.data);
-                    item.pubDate = timezone(parseDate($('.left-attr.first').text().trim()), 8);
-                    item.description =
-                        $('.article-content').html() &&
-                        $('.article-content')
-                            .html()
-                            .replaceAll('src="/', `src="${new URL('.', host).href}`)
-                            .replaceAll('href="/', `href="${new URL('.', host).href}`)
-                            .trim();
-                } catch {
-                    // intranet
-                    item.description = '请进行统一身份认证后查看全文';
-                }
-                return item;
-            })
-        )
+    const out = await pMap(
+        list,
+        async (item: (typeof list)[number]) => {
+            const detail = await cache.tryGet(item.link, async () => {
+                const response = await got(item.link);
+                const $ = load(response.data);
+                const published = $('.left-attr.first').text();
+                return {
+                    pubDate: parsePublicationDate(published),
+                    description: $('.article-content').html()?.trim(),
+                };
+            });
+            return { ...item, ...detail, pubDate: detail.pubDate ?? item.pubDate };
+        },
+        { concurrency: 3 }
     );
 
     return {

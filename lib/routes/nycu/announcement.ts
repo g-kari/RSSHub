@@ -25,11 +25,11 @@ async function handler(ctx: Context): Promise<Data> {
     const item = $('.category-style tr .style2')
         .toArray()
         .map((titleEle) => {
-            const date = $(titleEle).parent().next().find('td').text().split('-')[0]?.trim();
+            const date = $(titleEle).parent().next().find('td').text().split('-', 1)[0];
 
             return {
-                title: $(titleEle).attr('title')?.trim() || '',
-                link: $(titleEle).find('a').attr('href') || '',
+                title: $(titleEle).find('a').attr('title') || $(titleEle).find('a').text(),
+                link: new URL($(titleEle).find('a').attr('href') || '', url).href,
                 pubDate: date ? timezone(date, 8) : undefined,
             };
         });

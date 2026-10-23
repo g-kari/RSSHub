@@ -3,6 +3,7 @@ import ConfigNotFoundError from '@/errors/types/config-not-found';
 import type { Data, Route } from '@/types';
 import { ViewType } from '@/types';
 import { fallback, queryToBoolean } from '@/utils/readable-social';
+import { getRouteLimit } from '@/utils/route-limit';
 
 import { getNSFWUserNovels } from './novel-api/user-novels/nsfw';
 import { getSFWUserNovels } from './novel-api/user-novels/sfw';
@@ -76,18 +77,21 @@ const hasPixivAuth = () => Boolean(config.pixiv && config.pixiv.refreshToken);
 async function handler(ctx): Promise<Data> {
     const id = ctx.req.param('id');
     const fullContent = fallback(undefined, queryToBoolean(ctx.req.param('full_content')), false);
-    const { limit } = ctx.req.query();
+    const limit = getRouteLimit(ctx, 100);
 
     if (hasPixivAuth()) {
         return await getNSFWUserNovels(id, fullContent, limit);
     }
 
-    const nonR18Result = await getSFWUserNovels(id, fullContent, limit).catch((error) => {
-        if (error.name === 'Error') {
-            return null;
+    let nonR18Result;
+    try {
+        nonR18Result = await getSFWUserNovels(id, fullContent, limit);
+    } catch (error: any) {
+        if (error.name !== 'Error') {
+            throw error;
         }
-        throw error;
-    });
+        nonR18Result = null;
+    }
 
     if (nonR18Result) {
         return nonR18Result;

@@ -1,0 +1,1 @@
+import './twitter-worker.test';

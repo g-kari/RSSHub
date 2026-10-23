@@ -1,16 +1,17 @@
 import { load } from 'cheerio';
 
-import type { Route } from '@/types';
+import type { DataItem, Language, Route } from '@/types';
 import cache from '@/utils/cache';
 import got from '@/utils/got';
 import { parseDate } from '@/utils/parse-date';
+import { getRouteLimit } from '@/utils/route-limit';
 import timezone from '@/utils/timezone';
 
 import { renderDescription } from './templates/description';
 
 export const handler = async (ctx) => {
     const { category = 'zx/zxfb/' } = ctx.req.param();
-    const limit = ctx.req.query('limit') ? Number.parseInt(ctx.req.query('limit'), 10) : 10;
+    const limit = getRouteLimit(ctx, 10);
 
     const rootUrl = 'http://www.agri.cn';
     const currentUrl = new URL(category.endsWith('/') ? category : `${category}/`, rootUrl).href;
@@ -19,20 +20,20 @@ export const handler = async (ctx) => {
 
     const $ = load(response);
 
-    const language = $('html').prop('lang');
+    const language = $('html').prop('lang') as Language;
 
     let items = $('div.list_li_con, div.nxw_video_com')
         .slice(0, limit)
         .toArray()
-        .map((item) => {
-            item = $(item);
+        .map((item): DataItem => {
+            const $item = $(item);
 
-            const a = item.find('a').first();
+            const a = $item.find('a').first();
 
             const title = a.text();
-            const image = item.find('img').first().prop('src') ? new URL(item.find('img').first().prop('src'), rootUrl).href : undefined;
+            const image = $item.find('img').first().prop('src') ? new URL($item.find('img').first().prop('src')!, rootUrl).href : undefined;
             const description = renderDescription({
-                intro: item.find('p.con_text').text() || undefined,
+                intro: $item.find('p.con_text').text() || undefined,
                 images: image
                     ? [
                           {
@@ -46,11 +47,11 @@ export const handler = async (ctx) => {
             return {
                 title,
                 description,
-                pubDate: parseDate(item.find('span.con_date_span').text() || `${item.find('div.com_time_p2').text().trim()}${item.find('div.com_time_p1').text()}`, ['YYYY-MM-DD', 'YYYY.MM.DD']),
-                link: new URL(a.prop('href'), currentUrl).href,
+                pubDate: parseDate($item.find('span.con_date_span').text() || `${$item.find('div.com_time_p2').text().trim()}${$item.find('div.com_time_p1').text()}`, ['YYYY-MM-DD', 'YYYY.MM.DD']),
+                link: new URL(a.prop('href')!, currentUrl).href,
                 content: {
                     html: description,
-                    text: item.find('p.con_text').text() || undefined,
+                    text: $item.find('p.con_text').text() || undefined,
                 },
                 image,
                 banner: image,
@@ -60,7 +61,7 @@ export const handler = async (ctx) => {
 
     items = await Promise.all(
         items.map((item) =>
-            cache.tryGet(item.link, async () => {
+            cache.tryGet(item.link!, async () => {
                 const { data: detailResponse } = await got(item.link);
 
                 const $$ = load(detailResponse);
@@ -72,7 +73,7 @@ export const handler = async (ctx) => {
 
                 item.title = title;
                 item.description = description;
-                item.pubDate = timezone(parseDate($$('meta[name="publishdate"]').prop('content')), +8);
+                item.pubDate = timezone(parseDate($$('meta[name="publishdate"]').prop('content')), 8);
                 item.author = $$('meta[name="author"]').prop('content') || $$('meta[name="source"]').prop('content');
                 item.content = {
                     html: description,
@@ -89,7 +90,7 @@ export const handler = async (ctx) => {
         )
     );
 
-    const image = new URL($('div.logo img').prop('src'), rootUrl).href;
+    const image = new URL($('div.logo img').prop('src')!, rootUrl).href;
 
     return {
         title: $('title').text(),
@@ -178,12 +179,8 @@ export const route: Route = {
     },
     radar: [
         {
-            source: ['www.agri.cn/:category?'],
-            target: (params) => {
-                const category = params.category;
-
-                return category ? `/${category}` : '';
-            },
+            source: ['www.agri.cn/*category', 'www.agri.cn/'],
+            target: '/:category?',
         },
         {
             title: '机构 - 成果展示',
