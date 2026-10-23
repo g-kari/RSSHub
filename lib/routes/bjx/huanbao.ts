@@ -6,6 +6,7 @@ import type { APIRequestContext } from 'patchright';
 import type { Route } from '@/types';
 import cache from '@/utils/cache';
 import { parseDate } from '@/utils/parse-date';
+import { mapInSeries } from '@/utils/sequence';
 import timezone from '@/utils/timezone';
 
 import { fetchBjxPage, getBjxPage } from './utils';
@@ -81,16 +82,15 @@ const fetchPage = (link: string, context: APIRequestContext) =>
         const pagelinks = $page('#article_cont .cc-paging a');
 
         if (pagelinks.length > 0) {
-            for (const pagelink of pagelinks) {
+            await mapInSeries(pagelinks.toArray(), async (pagelink) => {
                 const $a = $page(pagelink);
                 if (!/^\d+$/.test($a.text().trim())) {
-                    continue;
+                    return;
                 }
                 const sublink = new URL($a.attr('href')!, link).href;
-                /* eslint-disable no-await-in-loop */
                 const html = await fetchBjxPage(sublink, context);
                 pages.push(load(html));
-            }
+            });
         }
 
         const item = {

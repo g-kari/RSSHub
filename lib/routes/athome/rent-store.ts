@@ -8,6 +8,7 @@ import logger from '@/utils/logger';
 import { parseDate } from '@/utils/parse-date';
 import { getPlaywrightPage } from '@/utils/playwright';
 import { getRouteLimit } from '@/utils/route-limit';
+import { mapInSeries } from '@/utils/sequence';
 import timezone from '@/utils/timezone';
 
 const HOST = 'https://www.athome.co.jp';
@@ -328,23 +329,19 @@ export const handler = async (ctx): Promise<Data> => {
 
         const deadline = Math.min(Date.now() + DETAIL_BUDGET_MS, startedAt + TOTAL_BUDGET_MS);
         let skipped = 0;
-        for (const b of bukken) {
+        await mapInSeries(bukken, async (b) => {
             let detail: Detail | null = null;
             if (wantDetail) {
                 const key = `athome:detail:${b.id}`;
                 // A cache hit costs no navigation, so it never draws on the budget: a warm poll still
                 // returns every listing fully enriched however little time is left.
-                // eslint-disable-next-line no-await-in-loop -- one shared tab, so the detail pages must be visited in turn
                 const cached = await cache.get(key);
                 if (cached) {
                     detail = JSON.parse(cached) as Detail;
                 } else if (Date.now() < deadline) {
                     try {
-                        // eslint-disable-next-line no-await-in-loop -- same shared tab
                         await page.goto(`${HOST}/rent_store/${b.id}/`, { waitUntil: 'domcontentloaded' });
-                        // eslint-disable-next-line no-await-in-loop -- same shared tab
                         await page.waitForSelector('#serverApp-state', { state: 'attached', timeout: DETAIL_STATE_TIMEOUT });
-                        // eslint-disable-next-line no-await-in-loop -- same shared tab
                         detail = detailOf(await page.content());
                         cache.set(key, JSON.stringify(detail));
                     } catch (error) {
@@ -359,7 +356,7 @@ export const handler = async (ctx): Promise<Data> => {
             if (item !== null) {
                 items.push(item);
             }
-        }
+        });
         if (skipped > 0) {
             logger.warn(`athome: ${listUrl} ran out of its ${DETAIL_BUDGET_MS}ms enrichment budget; ${skipped} of ${bukken.length} listings carry list-page fields only`);
         }
