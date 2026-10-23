@@ -4,27 +4,28 @@ import type { Element } from 'domhandler';
 import type { Context } from 'hono';
 import { renderToString } from 'hono/jsx/dom/server';
 
-import type { Data, DataItem, Route } from '@/types';
+import type { Data, DataItem, Language, Route } from '@/types';
 import { ViewType } from '@/types';
 import cache from '@/utils/cache';
 import ofetch from '@/utils/ofetch';
 import { parseDate } from '@/utils/parse-date';
+import { getRouteLimit } from '@/utils/route-limit';
 
 export const handler = async (ctx: Context): Promise<Data> => {
     const { category = 'newly' } = ctx.req.param();
-    const limit: number = Number.parseInt(ctx.req.query('limit') ?? '30', 10);
+    const limit = getRouteLimit(ctx, 30);
 
     const baseUrl = 'https://www.199it.com';
-    const targetUrl: string = new URL(category, baseUrl).href;
+    const targetUrl = `${baseUrl}/${category}`;
 
     const response = await ofetch(targetUrl);
     const $: CheerioAPI = load(response);
-    const language = $('html').attr('lang') ?? 'zh-CN';
+    const language = ($('html').attr('lang') ?? 'zh-CN') as Language;
 
     let items: DataItem[] = $('article.newsplus')
         .slice(0, limit)
         .toArray()
-        .map((el): Element => {
+        .map((el) => {
             const $el: Cheerio<Element> = $(el);
 
             const title: string = $el.find('h2.entry-title').text();
@@ -57,7 +58,7 @@ export const handler = async (ctx: Context): Promise<Data> => {
                 }
 
                 return cache.tryGet(item.link, async (): Promise<DataItem> => {
-                    const detailResponse = await ofetch(item.link);
+                    const detailResponse = await ofetch(item.link!);
                     const $$: CheerioAPI = load(detailResponse);
 
                     $$('div.entry-content img.alignnone').each((_, el) => {
@@ -112,7 +113,7 @@ export const handler = async (ctx: Context): Promise<Data> => {
 
                     $$('ul.related_post').parent().remove();
 
-                    const description: string | undefined = $$('div.entry-content').html();
+                    const description = $$('div.entry-content').html();
 
                     processedItem = {
                         ...processedItem,
@@ -141,7 +142,7 @@ export const handler = async (ctx: Context): Promise<Data> => {
         item: items,
         allowEmpty: true,
         image: $('h3.site-title img').attr('src'),
-        author: title.split(/-/).pop()?.trim(),
+        author: title.split(/-/).pop(),
         language,
         id: targetUrl,
     };
@@ -151,7 +152,7 @@ export const route: Route = {
     path: '/:category{.+}?',
     name: '资讯',
     url: '199it.com',
-    maintainers: ['nczitzk'],
+    maintainers: ['salviox', 'nczitzk'],
     handler,
     example: '/199it/newly',
     parameters: {

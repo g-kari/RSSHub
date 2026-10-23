@@ -46,9 +46,12 @@ export const route: Route = {
 
 async function handler(ctx) {
     if (!ctx.req.param('type')) {
-        throw new InvalidParameterError('Bad parameter. See <a href="https://docs.rsshub.app/routes/game#wang-yi-da-shen">https://docs.rsshub.app/routes/game#wang-yi-da-shen</a>');
+        throw new InvalidParameterError('Please specify a column ID between 1 and 15.');
     }
-    const selectedType = Number.parseInt(ctx.req.param('type'));
+    const selectedType = Number(ctx.req.param('type'));
+    if (!Object.hasOwn(typeMap, selectedType)) {
+        throw new InvalidParameterError('Invalid column ID. Use a value between 1 and 15.');
+    }
     let type;
     switch (selectedType) {
         case 1:
@@ -102,7 +105,7 @@ async function handler(ctx) {
     const url = `https://3g.163.com/touch/reconstruct/article/list/${type}/0-20.html`;
     const response = await got(url);
     const data = response.data;
-    const matches = data.replaceAll(/\s/g, '').match(/artiList\((.*?)]}\)/);
+    const matches = data.replaceAll(/\s/g, '').match(/artiList\((.*?)\]\}\)/);
     const articlelist0 = matches[1].replace(/".*?wangning/, '"articles') + ']}';
     const articlelist = JSON.parse(articlelist0);
     const articles = articlelist.articles;
@@ -112,7 +115,7 @@ async function handler(ctx) {
             let url = article.url;
             if (url === null || article.skipType === 'video') {
                 const skipurl = article.skipURL;
-                const vid = skipurl.match(/vid=(.*?)$/);
+                const vid = skipurl.match(/vid=(.*)$/);
                 if (vid !== null) {
                     url = `https://3g.163.com/exclusive/video/${vid[1]}.html`;
                 }

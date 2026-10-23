@@ -1,4 +1,6 @@
-import type { Route } from '@/types';
+import { escape } from 'entities/escape';
+
+import type { Data, Route } from '@/types';
 import ofetch from '@/utils/ofetch';
 import { parseDate } from '@/utils/parse-date';
 
@@ -33,7 +35,7 @@ export const route: Route = {
     handler,
 };
 
-async function handler(ctx) {
+async function handler(ctx): Promise<Data> {
     const slug = ctx.req.param('slug');
 
     const event = await ofetch<Event>(`${GAMMA_API}/events/slug/${slug}`);
@@ -42,23 +44,25 @@ async function handler(ctx) {
         throw new Error('Event not found');
     }
 
-    const items = event.markets.map((market) => ({
+    const items = event.markets!.map((market) => ({
         title: market.question,
+        guid: market.id,
         description: `
-            <p><strong>Odds:</strong> ${formatOddsDisplay(market)}</p>
+            <p><strong>Odds:</strong> ${escape(formatOddsDisplay(market))}</p>
             <p><strong>Volume:</strong> $${Number(market.volume || 0).toLocaleString()}</p>
             ${market.oneDayPriceChange ? `<p><strong>24h Change:</strong> ${(market.oneDayPriceChange * 100).toFixed(1)}%</p>` : ''}
-            ${market.image ? `<img src="${market.image}" alt="${market.question}" style="max-width: 100%;">` : ''}
+            ${market.image ? `<img src="${escape(market.image)}" alt="${escape(market.question)}" style="max-width: 100%;">` : ''}
         `,
         link: `https://polymarket.com/event/${event.slug}`,
         pubDate: market.startDate || event.startDate ? parseDate(market.startDate || event.startDate!) : undefined,
-        category: event.tags?.map((t) => t.label).filter(Boolean) as string[],
+        category: event.tags?.map((t) => t.label).filter((label): label is string => Boolean(label)),
     }));
 
     return {
         title: event.title,
         link: `https://polymarket.com/event/${event.slug}`,
         item: items,
+        language: 'en',
         description: event.description,
     };
 }

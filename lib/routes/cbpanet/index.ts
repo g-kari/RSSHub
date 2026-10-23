@@ -1,14 +1,15 @@
 import { load } from 'cheerio';
 
-import type { Route } from '@/types';
+import type { DataItem, Language, Route } from '@/types';
 import cache from '@/utils/cache';
 import got from '@/utils/got';
 import { parseDate } from '@/utils/parse-date';
+import { getRouteLimit } from '@/utils/route-limit';
 import timezone from '@/utils/timezone';
 
 export const handler = async (ctx) => {
     const { bigId = '2', smallId = '11' } = ctx.req.param();
-    const limit = ctx.req.query('limit') ? Number.parseInt(ctx.req.query('limit'), 10) : 15;
+    const limit = getRouteLimit(ctx, 15);
 
     const rootUrl = 'https://www.cbpanet.com';
     const currentUrl = new URL(`dzp_news.aspx?bigid=${bigId}&smallid=${smallId}`, rootUrl).href;
@@ -17,26 +18,26 @@ export const handler = async (ctx) => {
 
     const $ = load(response);
 
-    const language = $('html').prop('lang');
+    const language = $('html').prop('lang') as Language | undefined;
 
     let items = $('div.divmore ul li')
         .slice(0, limit)
         .toArray()
-        .map((item) => {
-            item = $(item);
+        .map((item): DataItem => {
+            const $item = $(item);
 
-            const a = item.find('div.zxcont1 a');
+            const a = $item.find('div.zxcont1 a');
 
             return {
                 title: a.text(),
-                pubDate: parseDate(item.find('div.zxtime1').text(), 'YY/MM/DD'),
-                link: new URL(a.prop('href'), rootUrl).href,
+                pubDate: parseDate($item.find('div.zxtime1').text(), 'YY/MM/DD'),
+                link: new URL(a.prop('href')!, rootUrl).href,
             };
         });
 
     items = await Promise.all(
         items.map((item) =>
-            cache.tryGet(item.link, async () => {
+            cache.tryGet(item.link!, async () => {
                 const { data: detailResponse } = await got(item.link);
 
                 const $$ = load(detailResponse);
@@ -52,7 +53,7 @@ export const handler = async (ctx) => {
                             .replace(/发布时间:/, ''),
                         'YYYY/M/D HH:mm:ss'
                     ),
-                    +8
+                    8
                 );
                 item.content = {
                     html: description,
@@ -64,16 +65,15 @@ export const handler = async (ctx) => {
     );
 
     const title = $('title').text();
-    const image = new URL($('div#logo img').prop('src'), rootUrl).href;
+    const image = new URL($('div#logo img').prop('src')!, rootUrl).href;
 
     return {
         title,
         description: title.split(/-/).pop(),
         link: currentUrl,
         item: items,
-        allowEmpty: true,
         image,
-        author: title.split(/-/)[0],
+        author: title.split(/-/, 1)[0],
         language,
     };
 };
@@ -81,7 +81,7 @@ export const handler = async (ctx) => {
 export const route: Route = {
     path: '/dzp_news/:bigId?/:smallId?',
     name: '资讯',
-    url: 'cbpanet.com',
+    url: 'www.cbpanet.com',
     maintainers: ['nczitzk'],
     handler,
     example: '/cbpanet/dzp_news/2/11',
@@ -90,7 +90,7 @@ export const route: Route = {
         smallId: '子分类 id，默认为 `11`，即行业资讯，可在对应分类页 URL 中找到',
     },
     description: `::: tip
-若订阅 [行业资讯](https://www.cbpanet.com/dzp_news.aspx?bigid=2\\&smallid=11)，网址为 \`https://www.cbpanet.com/dzp_news.aspx?bigid=2&smallid=11\`。截取 \`https://www.cbpanet.com/\` 的 \`bigid\` 和 \`smallid\` 的部分作为参数填入，此时路由为 [\`/cbpanet/dzp_news/4/15\`](https://rsshub.app/cbpanet/dzp_news/4/15)。
+若订阅 [行业资讯](https://www.cbpanet.com/dzp_news.aspx?bigid=2\\&smallid=11)，网址为 \`https://www.cbpanet.com/dzp_news.aspx?bigid=2&smallid=11\`。截取 \`https://www.cbpanet.com/\` 的 \`bigid\` 和 \`smallid\` 的部分作为参数填入，此时路由为 [\`/cbpanet/dzp_news/2/11\`](https://rsshub.app/cbpanet/dzp_news/2/11)。
 :::
 
 <details>
@@ -155,16 +155,6 @@ export const route: Route = {
         supportScihub: false,
     },
     radar: [
-        {
-            source: ['www.cbpanet.com/dzp_news.aspx'],
-            target: (_, url) => {
-                url = new URL(url);
-                const bigId = url.searchParams.get('bigid');
-                const smallId = url.searchParams.get('smallid');
-
-                return `/dzp_news${bigId ? `/${bigId}${smallId ? `/${smallId}` : ''}` : ''}`;
-            },
-        },
         {
             title: '协会 - 协会介绍',
             source: ['www.cbpanet.com/dzp_news.aspx'],

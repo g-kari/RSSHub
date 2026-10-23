@@ -1,4 +1,4 @@
-import type { Route } from '@/types';
+import type { Data, Route } from '@/types';
 import ofetch from '@/utils/ofetch';
 import { parseDate } from '@/utils/parse-date';
 
@@ -23,7 +23,11 @@ export const route: Route = {
     },
     radar: [
         {
-            source: ['polymarket.com', 'polymarket.com/:tagSlug'],
+            source: ['polymarket.com/'],
+            target: '/events',
+        },
+        {
+            source: ['polymarket.com/:tagSlug'],
             target: '/events/:tagSlug',
         },
     ],
@@ -33,21 +37,18 @@ export const route: Route = {
     handler,
 };
 
-async function handler(ctx) {
+async function handler(ctx): Promise<Data> {
     const tagSlug = ctx.req.param('tagSlug');
     const limit = 30;
 
-    const query: Record<string, unknown> = {
+    const query = {
         active: true,
         closed: false,
         limit,
         order: 'volume',
         ascending: false,
+        tag_slug: tagSlug || undefined,
     };
-
-    if (tagSlug) {
-        query.tag_slug = tagSlug;
-    }
 
     const response = await ofetch<EventsPagination>(`${GAMMA_API}/events/pagination`, { query });
 
@@ -58,12 +59,13 @@ async function handler(ctx) {
         description: formatEventDescription(event),
         link: `https://polymarket.com/event/${event.slug}`,
         pubDate: event.startDate ? parseDate(event.startDate) : undefined,
-        category: event.tags?.map((t) => t.label).filter(Boolean) as string[],
+        category: event.tags?.map((t) => t.label).filter((label): label is string => Boolean(label)),
     }));
 
     return {
         title: `Polymarket Events${tagSlug ? ` - ${tagSlug}` : ''}`,
         link: tagSlug ? `https://polymarket.com/${tagSlug}` : 'https://polymarket.com',
         item: items,
+        language: 'en',
     };
 }

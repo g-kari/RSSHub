@@ -3,6 +3,7 @@ import { load } from 'cheerio';
 import type { Route } from '@/types';
 import ofetch from '@/utils/ofetch';
 import { parseDate } from '@/utils/parse-date';
+import timezone from '@/utils/timezone';
 
 export const route: Route = {
     path: '/magazine/:id',
@@ -34,7 +35,6 @@ export const route: Route = {
 
         const response = await ofetch(openUrl, {
             headers: {
-                Referer: 'https://comic-fuz.com/',
                 'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8',
             },
         });
@@ -68,7 +68,7 @@ export const route: Route = {
                 thumb = `${imgUrl}${thumb}`;
             }
 
-            const rawDate = item.updatedDate ? item.updatedDate.replace(/\s*発売/, '').trim() : '';
+            const rawDate = item.updatedDate ? item.updatedDate.replace(/\s*発売/, '') : '';
 
             return {
                 title: `${magazineTitle} - ${item.magazineIssueName}`,
@@ -76,11 +76,10 @@ export const route: Route = {
                 description: `
                 ${thumb ? `<img src="${thumb}" style="max-width: 100%;"><br>` : ''}
                 <p>价格: ${amount} 金币/银币</p>
-                <p>发售日期: ${item.updatedDate}</p>
                 <p>截止日期: ${item.endDate || '无'}</p>
                 ${item.longDescription ? `<p>${item.longDescription}</p>` : ''}
                 `,
-                pubDate: rawDate ? parseDate(rawDate, 'YYYY/MM/DD') : undefined,
+                pubDate: rawDate ? timezone(parseDate(rawDate, 'YYYY/MM/DD'), 9) : undefined,
                 guid: `comicfuz-magazine-id-${item.magazineIssueId}`,
                 category: [statusText],
             };

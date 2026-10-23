@@ -1,26 +1,27 @@
 import { load } from 'cheerio';
+import pMap from 'p-map';
 
-import type { Route } from '@/types';
+import type { DataItem, Route } from '@/types';
 import cache from '@/utils/cache';
 import got from '@/utils/got';
-import { parseDate } from '@/utils/parse-date';
+import { parseDateInTimezone } from '@/utils/parse-date-in-timezone';
 
 import { renderDescription } from './templates/description';
 
 /**
  * Parses a tree array and returns an array of objects containing the key-value pairs.
  * @param {Array} tree - The tree to parse.
- * @param {Array} result - The result array to store the parsed key-value pairs. Default is an empty array.
  *
  * @returns {Array} - An array of objects containing the key-value pairs.
  */
-const parseTree = (tree, result = []) => {
+const parseTree = (tree) => {
+    const result: Array<{ key: any; value: any }> = [];
     for (const obj of tree) {
         const { key, value, children } = obj;
         result.push({ key, value });
 
         if (children && children.length > 0) {
-            parseTree(children, result);
+            result.push(...parseTree(children));
         }
     }
 
@@ -158,17 +159,17 @@ export const route: Route = {
 
 async function handler(ctx) {
     const { industry, label } = ctx.req.param();
-    const limit = ctx.req.query('limit') ? Number.parseInt(ctx.req.query('limit'), 10) : 50;
+    const requestedLimit = Number(ctx.req.query('limit'));
+    const limit = Number.isSafeInteger(requestedLimit) && requestedLimit > 0 ? requestedLimit : 50;
 
     const rootUrl = 'https://www.questmobile.com.cn';
     const apiUrl = new URL('api/v2/report/article-list', rootUrl).href;
     const apiTreeUrl = new URL('api/v2/report/industry-label-tree', rootUrl).href;
 
     const {
-        data: {
-            data: { industryTree, labelTree },
-        },
+        data: { data: treeData },
     } = await got(apiTreeUrl);
+    const { industryTree, labelTree } = treeData;
 
     const industries = parseTree(industryTree);
     const labels = parseTree(labelTree);
@@ -191,7 +192,7 @@ async function handler(ctx) {
         },
     });
 
-    let items = response.data.slice(0, limit).map((item) => ({
+    let items: Array<DataItem & { link: string }> = response.data.slice(0, limit).map((item) => ({
         title: item.title,
         link: new URL(`research/report/${item.id}`, rootUrl).href,
         description: renderDescription({
@@ -204,11 +205,12 @@ async function handler(ctx) {
         }),
         category: [...(item.industryList ?? []), ...(item.labelList ?? [])],
         guid: `questmobile-report#${item.id}`,
-        pubDate: parseDate(item.publishTime),
+        pubDate: item.publishTime ? parseDateInTimezone(item.publishTime, 8) : undefined,
     }));
 
-    items = await Promise.all(
-        items.map((item) =>
+    items = await pMap(
+        items,
+        (item) =>
             cache.tryGet(item.link, async () => {
                 const { data: detailResponse } = await got(item.link);
 
@@ -218,7 +220,7 @@ async function handler(ctx) {
 
                 item.title = content('div.title h1').text();
                 item.description += renderDescription({
-                    description: content('div.text').html(),
+                    description: content('div.text').html() ?? undefined,
                 });
                 item.author = content('div.source')
                     .text()
@@ -227,18 +229,21 @@ async function handler(ctx) {
                     .find('span')
                     .toArray()
                     .map((c) => content(c).text());
-                item.pubDate = parseDate(content('div.data span').prop('datetime'));
+                const date = content('div.data span').attr('datetime') || content('div.data span').text();
+                if (date) {
+                    item.pubDate = parseDateInTimezone(date, 8);
+                }
 
                 return item;
-            })
-        )
+            }),
+        { concurrency: 3 }
     );
 
     const { data: currentResponse } = await got(currentUrl);
 
     const $ = load(currentResponse);
 
-    const author = $('meta[property="og:title"]').prop('content').split(/-/)[0];
+    const author = $('meta[property="og:title"]').prop('content').split(/-/, 1)[0];
     const categories = [industryObj?.value, labelObj?.value].filter(Boolean);
     const image = $(`img[alt="${author}"]`).prop('src');
     const icon = $('link[rel="shortcut icon"]').prop('href');
@@ -248,12 +253,11 @@ async function handler(ctx) {
         title: `${author}${categories.length === 0 ? '' : ` - ${categories.join(' - ')}`}`,
         link: currentUrl,
         description: $('meta[property="og:description"]').prop('content'),
-        language: 'zh',
+        language: 'zh' as const,
         image,
         icon,
         logo: icon,
         subtitle: $('meta[name="keywords"]').prop('content'),
         author,
-        allowEmpty: true,
     };
 }

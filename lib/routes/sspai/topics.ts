@@ -1,5 +1,4 @@
 import type { Route } from '@/types';
-import cache from '@/utils/cache';
 import got from '@/utils/got';
 import { parseDate } from '@/utils/parse-date';
 
@@ -22,7 +21,7 @@ export const route: Route = {
         },
     ],
     name: '专题',
-    maintainers: ['SunShinenny'],
+    maintainers: ['sunshinenny'],
     handler,
     url: 'sspai.com/topics',
     description: '此为专题广场更新提示 => 集合型而非单篇文章。与下方 "专题内文章更新" 存在明显区别！',
@@ -35,25 +34,13 @@ async function handler() {
         url: api_url,
     });
     const data = resp.data.list;
-    const items = await Promise.all(
-        data.map((item) => {
-            const link = `https://sspai.com/topic/${item.id}`;
-            let description = '';
-
-            const key = `sspai:topics:${item.id}`;
-            return cache.tryGet(key, () => {
-                description = `<br><img src="https://cdnfile.sspai.com/${item.banner}" alt="Article Cover Image" style="display: block; margin: 0 auto;"/>${item.intro}<br>如有兴趣,请复制链接订阅 <br> <h3>https://rsshub.app/sspai/topic/${item.id}</h3>`;
-
-                return {
-                    title: item.title.trim(),
-                    description,
-                    link,
-                    pubDate: parseDate(item.released_at * 1000),
-                    author: item.author.nickname,
-                };
-            });
-        })
-    );
+    const items = data.map((item) => ({
+        title: item.title,
+        description: `<br><img src="https://cdnfile.sspai.com/${item.banner}" alt="Article Cover Image" style="display: block; margin: 0 auto;"/>${item.intro}`,
+        link: `https://sspai.com/topic/${item.id}`,
+        pubDate: parseDate(item.released_at * 1000),
+        author: item.author.nickname,
+    }));
 
     return {
         title: '少数派专题广场更新推送',

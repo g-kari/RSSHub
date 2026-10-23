@@ -1,6 +1,6 @@
 import type { Route } from '@/types';
-import cache from '@/utils/cache';
 import got from '@/utils/got';
+import { getRouteLimit } from '@/utils/route-limit';
 
 import { baseUrl, getPlurk } from './utils';
 
@@ -32,11 +32,11 @@ async function handler(ctx) {
     const { data: apiResponse } = await got(`${baseUrl}/hotlinks/getLinks`, {
         searchParams: {
             offset: 0,
-            count: ctx.req.query('limit') ? Number(ctx.req.query('limit')) : 30,
+            count: getRouteLimit(ctx, 30),
         },
     });
 
-    const items = await Promise.all(apiResponse.map((item) => getPlurk(item.link_url.startsWith('https://www.plurk.com/p/') ? item.link_url : `plurk:${item.link_url}`, item, null, cache.tryGet)));
+    const items = await Promise.all(apiResponse.map((item) => getPlurk(item.link_url.startsWith('https://www.plurk.com/p/') ? item.link_url : `plurk:${item.link_url}`, item, null)));
 
     return {
         title: 'Hot Links - Plurk',

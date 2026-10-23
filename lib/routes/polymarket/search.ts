@@ -1,4 +1,4 @@
-import type { Route } from '@/types';
+import type { Data, Route } from '@/types';
 import ofetch from '@/utils/ofetch';
 import { parseDate } from '@/utils/parse-date';
 
@@ -27,7 +27,7 @@ export const route: Route = {
     handler,
 };
 
-async function handler(ctx) {
+async function handler(ctx): Promise<Data> {
     const query = ctx.req.param('query');
 
     const data = await ofetch<SearchResult>(`${GAMMA_API}/public-search`, {
@@ -42,12 +42,13 @@ async function handler(ctx) {
         description: formatEventDescription(event),
         link: `https://polymarket.com/event/${event.slug}`,
         pubDate: event.startDate ? parseDate(event.startDate) : undefined,
-        category: event.tags?.map((t) => t.label).filter(Boolean) as string[],
+        category: event.tags?.map((t) => t.label).filter((label): label is string => Boolean(label)),
     }));
 
     return {
         title: `Polymarket Search - ${query}`,
         link: `https://polymarket.com/search?q=${encodeURIComponent(query)}`,
         item: items,
+        language: 'en',
     };
 }

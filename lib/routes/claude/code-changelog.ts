@@ -5,9 +5,11 @@ import type { Context } from 'hono';
 import type { Data, DataItem, Route } from '@/types';
 import ofetch from '@/utils/ofetch';
 import { parseDate } from '@/utils/parse-date';
+import { getRouteLimit } from '@/utils/route-limit';
+import timezone from '@/utils/timezone';
 
 const handler = async (ctx: Context): Promise<Data> => {
-    const limit = Number.parseInt(ctx.req.query('limit') ?? '25', 10);
+    const limit = getRouteLimit(ctx, 25);
 
     const baseUrl = 'https://code.claude.com';
     const targetUrl = `${baseUrl}/docs/en/changelog`;
@@ -18,15 +20,15 @@ const handler = async (ctx: Context): Promise<Data> => {
     const items: DataItem[] = $('div.update-container')
         .slice(0, limit)
         .toArray()
-        .map((el): DataItem => {
+        .map((el): DataItem | null => {
             const $entry = $(el);
-            const version = $entry.find('[data-component-part="update-label"]').text().trim();
+            const version = $entry.find('[data-component-part="update-label"]').text();
             if (!version) {
-                return null as unknown as DataItem;
+                return null;
             }
 
-            const dateText = $entry.find('[data-component-part="update-description"]').text().trim();
-            const description = $entry.find('[data-component-part="update-content"]').html() ?? '';
+            const dateText = $entry.find('[data-component-part="update-description"]').text();
+            const description = $entry.find('[data-component-part="update-content"]').html();
 
             const anchor = $entry.attr('id') ?? version.replaceAll('.', '-');
             const link = `${targetUrl}#${anchor}`;
@@ -35,19 +37,18 @@ const handler = async (ctx: Context): Promise<Data> => {
                 title: version,
                 description,
                 link,
-                pubDate: dateText ? parseDate(dateText) : undefined,
+                pubDate: dateText ? timezone(parseDate(dateText), 0) : undefined,
                 guid: `claude-code-${version}`,
                 id: `claude-code-${version}`,
             };
         })
-        .filter(Boolean);
+        .filter((item): item is DataItem => item !== null);
 
     return {
         title: 'Claude Code Changelog',
         description: 'Changelog for Claude Code CLI',
         link: targetUrl,
         item: items,
-        allowEmpty: true,
     };
 };
 

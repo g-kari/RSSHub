@@ -1,10 +1,11 @@
 import { load } from 'cheerio';
+import { escapeText } from 'entities';
 
 import type { Route } from '@/types';
 import ofetch from '@/utils/ofetch';
 import { parseDate } from '@/utils/parse-date';
 
-function deserializeAstroProps(val: unknown): unknown {
+function deserializeAstroProps(val: any): any {
     if (Array.isArray(val)) {
         const tag = val[0];
         if (tag === 0) {
@@ -15,7 +16,7 @@ function deserializeAstroProps(val: unknown): unknown {
         }
         return val.map((item) => deserializeAstroProps(item));
     }
-    if (val && typeof val === 'object') {
+    if (val instanceof Object) {
         const result = {};
         for (const [key, v] of Object.entries(val)) {
             result[key] = deserializeAstroProps(v);
@@ -31,12 +32,24 @@ interface Package {
     authors: string[];
     license: string;
     description: string;
-    keywords: string[];
-    updatedAt: number;
+    keywords?: string[];
+    updatedAt?: number;
     releasedAt: number;
     hasRepo: boolean;
-    categories: string[];
+    categories?: string[];
     template: string | undefined;
+}
+
+interface SearchResults {
+    packages: Package[];
+}
+
+function getPublicationDate(value: number | undefined): Date | undefined {
+    if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+        return;
+    }
+    const date = parseDate(value, 'X');
+    return Number.isFinite(date.getTime()) ? date : undefined;
 }
 
 export const route: Route = {
@@ -56,13 +69,13 @@ export const route: Route = {
         const page = await ofetch(targetUrl);
         const $ = load(page);
         const props = $('astro-island[component-export="SearchResults"]').attr('props');
-        const searchResults = deserializeAstroProps(JSON.parse(props!)) as { packages: Package[] };
+        const searchResults: SearchResults = deserializeAstroProps(JSON.parse(props!));
         const pkgs = searchResults.packages.map((item) => ({
             title: `${item.name} (${item.version}) | ${item.description}`,
             link: `https://typst.app/universe/package/${item.name}`,
-            description: item.description,
-            pubDate: parseDate(item.updatedAt, 'X'),
-            category: item.keywords,
+            description: escapeText(item.description),
+            pubDate: getPublicationDate(item.updatedAt),
+            category: [...new Set([...(item.keywords ?? []), ...(item.categories ?? [])])],
             author: item.authors.join(', '),
         }));
 

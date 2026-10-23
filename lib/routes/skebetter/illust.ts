@@ -1,5 +1,5 @@
 import { config } from '@/config';
-import type { Data, DataItem, Route } from '@/types';
+import type { Data, Route } from '@/types';
 import cache from '@/utils/cache';
 
 import { fetchData, processItems } from './utils';
@@ -67,7 +67,7 @@ async function handler(ctx): Promise<Data> {
     const url = `${baseUrl}?type=${type}`;
 
     const items = await cache.tryGet(
-        url,
+        `skebetter:titles:v3:${url}`,
         async () => {
             const data = await fetchData(url);
             return processItems(data, 'illust');
@@ -79,6 +79,6 @@ async function handler(ctx): Promise<Data> {
     return {
         title: `Skebetter Illust - ${typeMap[type]}`,
         link: `https://skebetter.com/illust${linkMap[type]}`,
-        item: items as DataItem[],
+        item: items,
     };
 }

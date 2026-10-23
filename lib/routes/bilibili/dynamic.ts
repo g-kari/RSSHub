@@ -45,7 +45,7 @@ export const route: Route = {
 4.  视频和专栏，UP 主粉丝及关注只要求 \`SESSDATA\` 字段，动态需复制整段 Cookie`,
             },
         ],
-        requirePuppeteer: false,
+        requirePuppeteer: true,
         antiCrawler: false,
         supportBT: false,
         supportPodcast: false,
@@ -287,11 +287,11 @@ async function handler(ctx) {
 
     let body: BilibiliWebDynamicResponse;
 
-    const cookie = (await cacheIn.getCookie()) as string;
+    const cookie = await cacheIn.getCookie();
     body = await getDynamic(cookie);
 
     if (body?.code === -352) {
-        const cookie = (await cacheIn.getCookie(true)) as string;
+        const cookie = await cacheIn.getCookie(true);
         body = await getDynamic(cookie);
 
         if (body?.code === -352) {
@@ -299,7 +299,7 @@ async function handler(ctx) {
             throw new CaptchaError('遇到源站风控校验，请稍后再试');
         }
     }
-    const items = (body as BilibiliWebDynamicResponse)?.data?.items;
+    const items = body?.data?.items;
 
     let author = items[0]?.modules?.module_author?.name;
     let face = items[0]?.modules?.module_author?.face;
@@ -346,19 +346,15 @@ async function handler(ctx) {
                             const emoji = node.emoji;
                             description = description.replaceAll(
                                 emoji.text,
-                                `<img alt="${emoji.text}" src="${emoji.icon_url}" style="margin: -1px 1px 0px; display: inline-block; width: 20px; height: 20px; vertical-align: text-bottom;" title="" referrerpolicy="no-referrer">`
+                                () => `<img alt="${emoji.text}" src="${emoji.icon_url}" style="margin: -1px 1px 0px; display: inline-block; width: 20px; height: 20px; vertical-align: text-bottom;" title="">`
                             );
                         }
                         // 处理转发带图评论的情况
                         if (node?.pics?.length) {
                             const { pics, text } = node;
-                            description = description.replaceAll(
-                                text,
+                            description = description.replaceAll(text, () =>
                                 pics
-                                    .map(
-                                        (pic) =>
-                                            `<img alt="${text}" src="${pic.src}" style="margin: 0px 0px 0px; display: inline-block; width: ${pic.width}px; height: ${pic.height}px; vertical-align: text-bottom;" title="" referrerpolicy="no-referrer">`
-                                    )
+                                    .map((pic) => `<img alt="${text}" src="${pic.src}" style="margin: 0px 0px 0px; display: inline-block; width: ${pic.width}px; height: ${pic.height}px; vertical-align: text-bottom;" title="">`)
                                     .join('<br>')
                             );
                         }

@@ -8,6 +8,33 @@ import { parseDate } from '@/utils/parse-date';
 
 import { renderComic } from './template/comic';
 
+interface UpdatedComic {
+    id: number;
+    name: string;
+    comic_py: string;
+    status: string;
+    types: string;
+    authors: string;
+    cover: string;
+    last_update_chapter_id: number;
+    last_update_chapter_name: string;
+    last_updatetime: number;
+}
+
+interface UpdateListResponse {
+    data: {
+        comicList: UpdatedComic[];
+    };
+}
+
+interface ChapterDetailResponse {
+    data: {
+        chapterInfo: {
+            page_url?: string[];
+        };
+    };
+}
+
 export const route: Route = {
     path: '/update',
     categories: ['anime'],
@@ -41,16 +68,15 @@ export const route: Route = {
     handler: async () => {
         const baseUrl = 'https://manhua.zaimanhua.com';
         const currentUrl = `${baseUrl}/api/v1/comic2/update_list?status&theme&zone&cate&firstLetter&sortType&page=1&size=20`;
-        const headers: Record<string, string> = {
+        const headers: HeadersInit = {
             'user-agent': config.trueUA,
-            referer: baseUrl,
         };
         const token = config.zaimanhua.token;
         if (token) {
             headers.Authorization = token.startsWith('Bearer ') ? token : `Bearer ${token}`;
         }
 
-        const response = await ofetch(currentUrl, {
+        const response = await ofetch<UpdateListResponse>(currentUrl, {
             headers,
         });
 
@@ -65,23 +91,20 @@ export const route: Route = {
                 // 当前漫画章节内容的 API
                 const chapterUrl = `${baseUrl}/api/v1/comic2/chapter/detail?comic_id=${comicId}&chapter_id=${lastUpdateChapterId}`;
 
-                return await cache.tryGet(chapterUrl, async () => {
-                    // 获取章节内容
-                    const chapterResponse = await ofetch(chapterUrl, { headers });
-
-                    const chapterData = chapterResponse.data;
-                    const description = renderComic(chapterData.chapterInfo.page_url || []);
-
-                    return {
-                        title: `[${item.status}] | ${item.name} - ${item.last_update_chapter_name}`,
-                        author: item.authors,
-                        category: [item.status, ...item.types.split('/').map((type) => type.trim())],
-                        image: item.cover,
-                        link: `${baseUrl}/view/${comicPy}/${comicId}/${lastUpdateChapterId}`,
-                        pubDate: parseDate(item.last_updatetime * 1000),
-                        description,
-                    };
+                const pageUrls = await cache.tryGet(`${chapterUrl}:pages`, async () => {
+                    const chapterResponse = await ofetch<ChapterDetailResponse>(chapterUrl, { headers });
+                    return chapterResponse.data.chapterInfo.page_url || [];
                 });
+
+                return {
+                    title: `[${item.status}] | ${item.name} - ${item.last_update_chapter_name}`,
+                    author: item.authors,
+                    category: [item.status, ...item.types.split('/')],
+                    image: item.cover,
+                    link: `${baseUrl}/view/${comicPy}/${comicId}/${lastUpdateChapterId}`,
+                    pubDate: parseDate(item.last_updatetime * 1000),
+                    description: renderComic(pageUrls),
+                };
             },
             { concurrency: 3 }
         );

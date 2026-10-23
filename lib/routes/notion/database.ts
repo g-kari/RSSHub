@@ -1,4 +1,4 @@
-import { APIErrorCode, Client, isNotionClientError } from '@notionhq/client';
+import { APIErrorCode, Client, isFullPage, isNotionClientError } from '@notionhq/client';
 import { load } from 'cheerio';
 import MarkdownIt from 'markdown-it';
 import { NotionToMarkdown } from 'notion-to-md';
@@ -71,16 +71,19 @@ async function handler(ctx) {
 
     try {
         // Query database basic info
-        const database = await notion.databases.retrieve({ database_id: databaseId });
+        const database = (await notion.databases.retrieve({ database_id: databaseId })) as any;
         const title = database.title[0]?.plain_text;
         const description = database.description[0]?.plain_text;
         const link = database.url;
         const image = database.cover?.external.url ?? database.icon?.emoji;
 
         // List pages under the database
+        if (database.data_sources?.length !== 1) {
+            throw new InvalidParameterError('The database must have exactly one data source to query its pages.');
+        }
         const databaseQuery = parseCustomQuery(ctx.req.query('query'));
-        const { results } = await notion.databases.query({
-            database_id: databaseId,
+        const { results } = await notion.dataSources.query({
+            data_source_id: database.data_sources[0].id,
             ...databaseQuery,
         });
         const customProperties = parseCustomQuery(ctx.req.query('properties')) ?? {};
@@ -92,10 +95,10 @@ async function handler(ctx) {
 
         // Query page content
         const n2m = new NotionToMarkdown({ notionClient: notion });
-        const pageList = results.filter((item) => Object.values(item.properties).find((property) => property.id === 'title')?.title[0]?.plain_text);
+        const pageList = results.filter(isFullPage).filter((item) => Object.values<any>(item.properties).find((property) => property.id === 'title')?.title[0]?.plain_text);
         const items = await Promise.all(
             pageList.map(async (page) => {
-                const titleProperty = Object.values(page.properties).find((property) => property.id === 'title');
+                const titleProperty = Object.values<any>(page.properties).find((property) => property.id === 'title');
                 const pageTitle = titleProperty.title[0].plain_text;
                 const pageLink = page.url;
                 const pageLastEditedTime = page.last_edited_time;
@@ -164,16 +167,14 @@ async function handler(ctx) {
         logger.error(error);
 
         if (isNotionClientError(error)) {
-            if (error.statusCode === APIErrorCode.ObjectNotFound) {
-                throw new InvalidParameterError('The database is not exist');
-            } else if (error.statusCode === APIErrorCode.Unauthorized) {
-                throw new ConfigNotFoundError('Please check the config of NOTION_TOKEN');
-            } else {
-                ctx.throw(error.statusCode, 'Notion API Error');
+            if (error.code === APIErrorCode.ObjectNotFound) {
+                throw new InvalidParameterError('The database does not exist or is not shared with the Notion integration.');
             }
-        } else {
-            ctx.throw(error);
+            if (error.code === APIErrorCode.Unauthorized) {
+                throw new ConfigNotFoundError('Please check the config of NOTION_TOKEN');
+            }
         }
+        throw error;
     }
 }
 

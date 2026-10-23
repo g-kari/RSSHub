@@ -1,7 +1,8 @@
 import { config } from '@/config';
-import type { DataItem, Route } from '@/types';
+import type { Data, Route } from '@/types';
 import cache from '@/utils/cache';
 import ofetch from '@/utils/ofetch';
+import { getRouteLimit } from '@/utils/route-limit';
 
 import { baseUrl, getBuildId, getData, getList } from './utils';
 
@@ -135,47 +136,49 @@ const userPostQuery = /* GraphQL */ `
 `;
 
 export const route: Route = {
-    path: '/user/:userId/:innerSharedContent?',
+    path: '/user/:userId',
     example: '/daily/user/kramer',
     radar: [
         {
-            source: ['app.daily.dev/:userId/posts', 'app.daily.dev/:userId'],
+            source: ['daily.dev/:userId/posts'],
+            target: '/user/:userId',
+        },
+        {
+            source: ['app.daily.dev/:userId/posts'],
+            target: '/user/:userId',
         },
     ],
-    parameters: {
-        innerSharedContent: {
-            description: 'Where to Fetch inner Shared Posts instead of original',
-            default: 'false',
-            options: [
-                { value: 'false', label: 'False' },
-                { value: 'true', label: 'True' },
-            ],
-        },
-    },
     name: 'User Posts',
     maintainers: ['TonyRL'],
     handler,
     url: 'app.daily.dev',
 };
 
-async function handler(ctx) {
+interface UserProfile {
+    id: string;
+    name: string;
+    bio?: string;
+    image?: string;
+}
+
+async function handler(ctx): Promise<Data> {
     const userId = ctx.req.param('userId');
-    const limit = ctx.req.query('limit') ? Number.parseInt(ctx.req.query('limit'), 10) : 7;
-    const innerSharedContent = ctx.req.param('innerSharedContent') ? JSON.parse(ctx.req.param('innerSharedContent')) : false;
+    const requestedLimit = getRouteLimit(ctx, 7);
+    const limit = ctx.req.query('sorted') === 'false' ? requestedLimit : Math.max(7, requestedLimit);
     const buildId = await getBuildId();
 
     const userData = await cache.tryGet(`daily:user:${userId}`, async () => {
-        const response = await ofetch(`${baseUrl}/_next/data/${buildId}/en/${userId}.json`, {
+        const response = await ofetch<{ pageProps: { user: UserProfile } }>(`${baseUrl}/_next/data/${buildId}/${userId}.json`, {
             query: {
                 userId,
             },
         });
         return response.pageProps;
     });
-    const user = (userData as any).user;
+    const user = userData.user;
 
     const items = await cache.tryGet(
-        `daily:user:${userId}:posts`,
+        `daily:user:${userId}:posts:${limit}`,
         async () => {
             const edges = await getData({
                 query: userPostQuery,
@@ -185,7 +188,7 @@ async function handler(ctx) {
                     loggedIn: false,
                 },
             });
-            return getList(edges, innerSharedContent, true);
+            return getList(edges);
         },
         config.cache.routeExpire,
         false
@@ -195,7 +198,7 @@ async function handler(ctx) {
         title: `${user.name} | daily.dev`,
         description: user.bio,
         link: `${baseUrl}/${userId}/posts`,
-        item: items as DataItem[],
+        item: items,
         image: user.image,
         logo: user.image,
         icon: user.image,

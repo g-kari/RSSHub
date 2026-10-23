@@ -2,10 +2,11 @@ import { load } from 'cheerio';
 import { renderToString } from 'hono/jsx/dom/server';
 import iconv from 'iconv-lite';
 
-import type { Route } from '@/types';
+import type { DataItem, Language, Route } from '@/types';
 import cache from '@/utils/cache';
 import got from '@/utils/got';
 import { parseDate } from '@/utils/parse-date';
+import { getRouteLimit } from '@/utils/route-limit';
 import timezone from '@/utils/timezone';
 
 export const route: Route = {
@@ -86,7 +87,7 @@ export const route: Route = {
 
 async function handler(ctx) {
     const { id = '751' } = ctx.req.param();
-    const limit = ctx.req.query('limit') ? Number.parseInt(ctx.req.query('limit'), 10) : 30;
+    const limit = getRouteLimit(ctx, 30);
 
     const rootUrl = 'https://www.8264.com';
     const currentUrl = new URL(`list/${id}`, rootUrl).href;
@@ -103,20 +104,20 @@ async function handler(ctx) {
         .find('a')
         .slice(0, limit)
         .toArray()
-        .map((item) => {
-            item = $(item);
+        .map((item): DataItem => {
+            const $item = $(item);
 
-            const link = item.prop('href');
+            const link = $item.prop('href');
 
             return {
-                title: item.text(),
-                link: link.startsWith('http') ? link : new URL(link, rootUrl).href,
+                title: $item.text(),
+                link: link!.startsWith('http') ? link : new URL(link!, rootUrl).href,
             };
         });
 
     items = await Promise.all(
         items.map((item) =>
-            cache.tryGet(item.link, async () => {
+            cache.tryGet(item.link!, async () => {
                 const { data: detailResponse } = await got(item.link, {
                     responseType: 'buffer',
                 });
@@ -127,13 +128,13 @@ async function handler(ctx) {
                 content('i.pstatus').remove();
                 content('div.crly').remove();
 
-                const pubDate = content('span.pub-time').text() || content('span.fby span').first().prop('title') || content('span.fby').first().text().split('发表于').pop().trim();
+                const pubDate = content('span.pub-time').text() || content('span.fby span').first().prop('title') || content('span.fby').first().text().split('发表于').pop()!.trim();
 
-                content('img').each(function () {
-                    content(this).replaceWith(
+                content('img').each((_, el) => {
+                    content(el).replaceWith(
                         renderToString(
                             <figure>
-                                <img src={content(this).prop('file')} alt={content(this).prop('alt')} />
+                                <img src={content(el).prop('file')} alt={content(el).prop('alt')} />
                             </figure>
                         )
                     );
@@ -145,7 +146,7 @@ async function handler(ctx) {
                 item.category = content('div.fl_dh a, div.site a')
                     .toArray()
                     .map((c) => content(c).text().trim());
-                item.pubDate = timezone(parseDate(pubDate, ['YYYY-MM-DD HH:mm', 'YYYY-M-D HH:mm']), +8);
+                item.pubDate = timezone(parseDate(pubDate, ['YYYY-MM-DD HH:mm', 'YYYY-M-D HH:mm']), 8);
 
                 return item;
             })
@@ -160,7 +161,7 @@ async function handler(ctx) {
         title: `${$('span.country, h2').text()} - ${description.split(',').pop()}`,
         link: currentUrl,
         description,
-        language: 'zh-cn',
+        language: 'zh-CN' as const satisfies Language,
         icon,
         logo: icon,
         subtitle: $('meta[name="keywords"]').prop('content').trim(),

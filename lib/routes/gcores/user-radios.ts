@@ -2,14 +2,14 @@ import type { CheerioAPI } from 'cheerio';
 import { load } from 'cheerio';
 import type { Context } from 'hono';
 
-import type { Data, DataItem, Route } from '@/types';
+import type { Data, DataItem, Language, Route } from '@/types';
 import { ViewType } from '@/types';
 import ofetch from '@/utils/ofetch';
 import { parseDate } from '@/utils/parse-date';
 
 import { parseContent } from './parser';
 import { renderDescription } from './templates/description';
-import { baseUrl, imageBaseUrl } from './util';
+import { audioBaseUrl, baseUrl, getAudioMimeType, imageBaseUrl } from './util';
 
 const buildAuthors = (relationships: any, included: any[]): DataItem['author'] => {
     const authorObj = relationships?.user?.data;
@@ -20,38 +20,38 @@ const buildAuthors = (relationships: any, included: any[]): DataItem['author'] =
               {
                   name: authorIncluded.attributes?.nickname,
                   url: authorIncluded.id ? new URL(`users/${authorIncluded.id}`, baseUrl).href : undefined,
-                  avatar: authorIncluded.thumb ? new URL(authorIncluded.thumb, imageBaseUrl).href : undefined,
+                  avatar: authorIncluded.attributes?.thumb ? new URL(authorIncluded.attributes.thumb, imageBaseUrl).href : undefined,
               },
           ]
         : undefined;
 };
 
 const buildEnclosure = (attributes: any, relationships: any, included: any[], image: string | undefined, title: string | undefined) => {
-    const mediaAttrs = included.find((i) => i.id === relationships.media?.data?.id)?.attributes;
+    const mediaObj = relationships?.media?.data;
+    const mediaAttrs = mediaObj ? included.find((i) => i.type === mediaObj.type && i.id === mediaObj.id)?.attributes : undefined;
 
     let enclosureUrl: string | undefined;
     let enclosureType: string | undefined;
 
     if (attributes['speech-path']) {
         enclosureUrl = new URL(`uploads/audio/${attributes['speech-path']}`, 'https://alioss.gcores.com').href;
-        enclosureType = `audio/${enclosureUrl?.split(/\./).pop()}`;
+        enclosureType = getAudioMimeType(enclosureUrl);
     } else if (mediaAttrs && mediaAttrs.audio) {
-        enclosureUrl = mediaAttrs.audio;
-        enclosureType = `audio/${enclosureUrl?.split(/\./).pop()}`;
+        enclosureUrl = new URL(mediaAttrs.audio, `${audioBaseUrl}/uploads/audio/`).href;
+        enclosureType = getAudioMimeType(enclosureUrl);
     }
 
     if (!enclosureUrl) {
         return {};
     }
 
-    const enclosureLength = attributes.duration ? Number(attributes.duration) : 0;
+    const duration = attributes.duration ? Number(attributes.duration) : 0;
 
     return {
         enclosure_url: enclosureUrl,
         enclosure_type: enclosureType,
         enclosure_title: title,
-        enclosure_length: enclosureLength,
-        itunes_duration: enclosureLength,
+        itunes_duration: duration,
         itunes_item_image: image,
     };
 };
@@ -81,7 +81,7 @@ const buildDescription = (attributes: any, title: string | undefined, enclosureU
 
 export const handler = async (ctx: Context): Promise<Data> => {
     const { id } = ctx.req.param();
-    const limit = Number.parseInt(ctx.req.query('limit') ?? '30', 10);
+    const limit = Number(ctx.req.query('limit') ?? '30');
 
     const targetUrl = new URL(`users/${id}/content?tab=radios`, baseUrl).href;
     const apiUrl = new URL(`gapi/v1/users/${id}/radios`, baseUrl).href;
@@ -97,17 +97,17 @@ export const handler = async (ctx: Context): Promise<Data> => {
 
     const targetResponse = await ofetch(targetUrl);
     const $: CheerioAPI = load(targetResponse);
-    const language = $('html').attr('lang') ?? 'zh-CN';
+    const language = ($('html').attr('lang') ?? 'zh-CN') as Language;
 
     const included = response.included || [];
 
-    // 处理每个播客项目
     const items: DataItem[] = data.map((item): DataItem => {
         const attributes = item.attributes;
         const relationships = item.relationships;
 
         const title = attributes.title;
         const pubDate: number | string = attributes['published-at'];
+        const updated: number | string | undefined = attributes['author-modified-at'] ?? attributes['updated-at'];
         const linkUrl = new URL(`radios/${item.id}`, baseUrl).href;
         const image: string | undefined = (attributes.cover ?? attributes.thumb) ? new URL(attributes.cover ?? attributes.thumb, imageBaseUrl).href : undefined;
         const authors = buildAuthors(relationships, included);
@@ -126,12 +126,11 @@ export const handler = async (ctx: Context): Promise<Data> => {
             id: `gcores-${item.id}`,
             image,
             banner: image,
-            updated: pubDate ? parseDate(pubDate) : undefined,
+            updated: updated ? parseDate(updated) : undefined,
             language,
             description,
             content: {
                 html: description,
-                text: description,
             },
             ...enclosure,
         };
@@ -142,7 +141,6 @@ export const handler = async (ctx: Context): Promise<Data> => {
         description: $('meta[name="description"]').attr('content'),
         link: targetUrl,
         item: items,
-        allowEmpty: true,
         author: $('title').text().split(/\|/).pop()?.trim(),
         language,
         id: $('meta[property="og:url"]').attr('content'),

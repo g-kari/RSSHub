@@ -19,7 +19,7 @@ export const route: Route = {
     parameters: { uid: '用户 id, 可在 UP 主主页中找到', embed: '默认为开启内嵌视频, 任意值为关闭' },
     features: {
         requireConfig: false,
-        requirePuppeteer: false,
+        requirePuppeteer: true,
         antiCrawler: false,
         supportBT: false,
         supportPodcast: false,
@@ -67,7 +67,7 @@ const allowedBrowserRequestTypes = new Set(['document', 'script', 'xhr', 'fetch'
 const browserResponseTimeout = 45000;
 const browserCloseTimeout = 90000;
 
-const getErrorMessage = (error: unknown) => (error instanceof Error ? error.message : String(error));
+const getErrorMessage = (cause: unknown) => (cause instanceof Error ? cause.message : String(cause));
 
 const isVideoListApiResponse = (response: BrowserResponse) => {
     const request = response.request();
@@ -140,7 +140,7 @@ async function applyCookie(page: Page, cookie: string) {
         .filter((item) => item !== undefined);
 
     if (cookies.length > 0) {
-        await page.setCookie(...cookies);
+        await page.context().addCookies(cookies);
     }
 }
 
@@ -184,9 +184,9 @@ async function fetchVideoListFromBrowser(uid: string): Promise<VideoListData> {
                 await applyCookie(page, cookie);
             }
 
-            await page.setRequestInterception(true);
-            page.on('request', (request) => {
-                allowedBrowserRequestTypes.has(request.resourceType()) ? request.continue() : request.abort();
+            await page.route('**/*', (route) => {
+                const request = route.request();
+                allowedBrowserRequestTypes.has(request.resourceType()) ? route.continue() : route.abort();
             });
         },
         gotoConfig: { waitUntil: 'domcontentloaded' },
@@ -194,7 +194,7 @@ async function fetchVideoListFromBrowser(uid: string): Promise<VideoListData> {
 
     try {
         const response = await waitForVideoListResponseFromVideoPage(page, videoUrl);
-        const data = (await response.json()) as VideoListResponse;
+        const data: VideoListResponse = await response.json();
         if (data.code) {
             logger.error(JSON.stringify(data.data));
             throw new Error(`Got error code ${data.code} while fetching in browser mode: ${data.message}`);
@@ -224,7 +224,7 @@ async function handler(ctx: Context) {
 
     const uid = ctx.req.param('uid');
     const embed = !ctx.req.param('embed');
-    const data = await getVideoList(uid);
+    const data = await getVideoList(uid!);
     const videos = data.list?.vlist ?? [];
 
     let name = videos[0]?.author || uid;
@@ -233,7 +233,7 @@ async function handler(ctx: Context) {
     try {
         const usernameAndFace = await cache.getUsernameAndFaceFromUID(uid);
         name = usernameAndFace[0] || name;
-        face = usernameAndFace[1];
+        face = usernameAndFace[1] ?? undefined;
     } catch (error) {
         logger.warn(`[bilibili/video] failed to fetch user profile: ${error}`);
     }
@@ -250,7 +250,7 @@ async function handler(ctx: Context) {
                 const subtitles = isJsonFeed && !config.bilibili.excludeSubtitles && item.bvid ? await cache.getVideoSubtitleAttachment(item.bvid) : [];
                 return {
                     title: item.title,
-                    description: utils.renderUGCDescription(embed, item.pic, item.description, item.aid, undefined, item.bvid),
+                    description: utils.renderUGCDescription(embed, item.pic, item.description, String(item.aid), undefined, item.bvid),
                     pubDate: new Date(item.created * 1000).toUTCString(),
                     link: item.created > utils.bvidTime && item.bvid ? `https://www.bilibili.com/video/${item.bvid}` : `https://www.bilibili.com/video/av${item.aid}`,
                     author: name,

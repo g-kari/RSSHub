@@ -1,6 +1,7 @@
 import type { CheerioAPI } from 'cheerio';
 import { load } from 'cheerio';
 import type { Element } from 'domhandler';
+import pMap from 'p-map';
 
 import type { DataItem, Route } from '@/types';
 import cache from '@/utils/cache';
@@ -122,7 +123,7 @@ export const route: Route = {
     path: '/:date?',
     categories: ['traditional-media'],
     example: '/fjdaily/20260316',
-    parameters: { date: '日期，格式为 `YYYYMMDD`，留空时抓取当天全部版面，例如 `20260316`' },
+    parameters: { date: '日期，格式为 `YYYYMMDD`，留空时抓取最新一期全部版面，例如 `20260316`' },
     features: {
         requireConfig: false,
         requirePuppeteer: false,
@@ -173,23 +174,24 @@ async function handler(ctx) {
 
             return {
                 title: a.text().replaceAll(/\s+/g, ' ').trim(),
-                link: new URL(href, padUrl).toString().replace('/pad/', '/pc/'),
+                link: new URL(href, padUrl).href.replace('/pad/', '/pc/'),
                 category: [currentCategory.replace(/^\d+版\s*/, '')],
             };
         })
-        .filter((item): item is DataItem => item !== undefined);
+        .filter((item) => item !== undefined);
 
     if (list.length === 0) {
         throw new Error(`No articles were found for ${yearMonth}${day}.`);
     }
-
-    const items = await Promise.all(
-        list.map((item) =>
+    const candidates = list;
+    const items = await pMap(
+        candidates,
+        (item) =>
             cache.tryGet(item.link!, async () => {
                 const detailResponse = await got(item.link!);
                 const detail = load(detailResponse.data);
-                const pubDate = detail('#NewsArticlePubDay').text().trim();
-                const author = detail('#NewsArticleAuthor').text().trim();
+                const pubDate = detail('#NewsArticlePubDay').text();
+                const author = detail('#NewsArticleAuthor').text();
                 const description = getItemDescription(detail);
 
                 return {
@@ -198,13 +200,14 @@ async function handler(ctx) {
                     description: description || undefined,
                     pubDate: pubDate ? timezone(parseDate(pubDate), 8) : undefined,
                 };
-            })
-        )
+            }),
+        { concurrency: 3 }
     );
 
     return {
         title: `福建日报 - ${yearMonth.slice(0, 4)}-${yearMonth.slice(4, 6)}-${day}`,
         link: pageUrl,
+        language: 'zh-CN' as const,
         item: items,
     };
 }

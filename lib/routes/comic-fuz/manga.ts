@@ -3,6 +3,7 @@ import { load } from 'cheerio';
 import type { Route } from '@/types';
 import ofetch from '@/utils/ofetch';
 import { parseDate } from '@/utils/parse-date';
+import timezone from '@/utils/timezone';
 
 export const route: Route = {
     path: '/manga/:id',
@@ -34,7 +35,6 @@ export const route: Route = {
 
         const response = await ofetch(openUrl, {
             headers: {
-                Referer: 'https://comic-fuz.com/',
                 'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8',
             },
         });
@@ -53,7 +53,7 @@ export const route: Route = {
             throw new Error('无法解析页面 Props 数据');
         }
 
-        const mangaTitle = $('title').text().trim();
+        const mangaTitle = $('title').text();
         const mangaAuthor = pageProps.authorships?.map((item: any) => item.author?.authorName).join(', ') || '';
         const mangaDescription = pageProps.manga?.longDescription || '';
 
@@ -89,7 +89,7 @@ export const route: Route = {
                 guid: `comicfuz-comic-id-${chapter.chapterId}`,
                 category: statusText,
                 author: mangaAuthor,
-                pubDate: chapter.updatedDate ? parseDate(chapter.updatedDate, 'YYYY/MM/DD') : undefined,
+                pubDate: chapter.updatedDate ? timezone(parseDate(chapter.updatedDate, 'YYYY/MM/DD'), 9) : undefined,
                 upvotes: chapter.numberOfLikes || 0,
                 comments: chapter.numberOfComments || 0,
             };

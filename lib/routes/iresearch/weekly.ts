@@ -1,14 +1,16 @@
 import type { Context } from 'hono';
 
-import type { Data, Route } from '@/types';
+import type { Route } from '@/types';
 import { ViewType } from '@/types';
 
-export const handler = (ctx: Context): Data | undefined => {
+export const handler = (ctx: Context): void => {
     const { id } = ctx.req.param();
-    const limit: number = Number.parseInt(ctx.req.query('limit') ?? '20', 10);
+    const query = new URLSearchParams(ctx.req.query());
+    if (!query.has('limit')) {
+        query.set('limit', '20');
+    }
 
-    ctx.set('redirect', `/iresearch/report/3${id ? `/${id}` : ''}?limit=${limit}`);
-    return;
+    return ctx.set('redirect', `/iresearch/report/3${id ? `/${encodeURIComponent(id)}` : ''}?${query.toString()}`);
 };
 
 export const route: Route = {
@@ -73,12 +75,7 @@ export const route: Route = {
     radar: [
         {
             source: ['www.iresearch.com.cn/report.shtml'],
-            target: (_, url) => {
-                const urlObj: URL = new URL(url);
-                const id: string | undefined = urlObj.searchParams.get('classId') ?? urlObj.searchParams.get('channelId') ?? urlObj.searchParams.get('cid') ?? undefined;
-
-                return `/iresearch/weekly${id ? `/${id}` : ''}`;
-            },
+            target: '/weekly',
         },
         {
             title: '家电行业',

@@ -1,10 +1,12 @@
 import { load } from 'cheerio';
 
+import InvalidParameterError from '@/errors/types/invalid-parameter';
 import type { Route } from '@/types';
 import { ViewType } from '@/types';
 import cache from '@/utils/cache';
 import got from '@/utils/got';
 import { parseDate } from '@/utils/parse-date';
+import { isValidHost } from '@/utils/valid-host';
 
 import { renderDescription } from './templates/description';
 
@@ -40,6 +42,10 @@ export const route: Route = {
 
 async function handler(ctx) {
     const language = ctx.req.param('language');
+    if (!isValidHost(language)) {
+        throw new InvalidParameterError('Invalid language');
+    }
+
     const baseUrl = 'https://www.jimmyspa.com';
     const booksListUrl = new URL(`/${language}/Books/Ajax/changeList?year=&keyword=&categoryId=0&page=1`, baseUrl).href;
 
@@ -55,39 +61,41 @@ async function handler(ctx) {
             const bookImageUrl = bookImageRelative ? baseUrl + bookImageRelative : '';
             const bookDetailUrl = bookContent('li.work_block').prop('data-route');
 
-            const { renderedDescription, publishDate } = (await cache.tryGet(bookDetailUrl, async () => {
+            const { processedDescription, publishDate } = await cache.tryGet(`${bookDetailUrl}:details`, async () => {
                 const detailResponse = await got(bookDetailUrl);
                 const detailPage = load(detailResponse.data);
                 const bookDescription = detailPage('article.intro_cont').html() || '';
                 const bookInfoWrap = detailPage('div.info_wrap').html() || '';
 
                 const processedDescription = bookDescription.replaceAll(/<img\b[^>]*>/g, (imgTag) =>
-                    imgTag.replaceAll(/\b(src|data-src)="(?!http|https|\/\/)([^"]*)"/g, (_, attrName, relativePath) => {
+                    imgTag.replaceAll(/\b(src|data-src)="(?!http|\/\/)([^"]*)"/g, (_, attrName, relativePath) => {
                         const absoluteImageUrl = new URL(relativePath, baseUrl).href;
                         return `${attrName}="${absoluteImageUrl}"`;
                     })
                 );
 
                 const publishDateMatch = bookInfoWrap.match(/<span>(首次出版|First Published|初版)<\/span>\s*<span class="num">([^<]+)<\/span>/);
-                const publishDate = publishDateMatch ? parseDate(publishDateMatch[2] + '-02') : '';
-
-                const renderedDescription = renderDescription({
-                    images: bookImageUrl
-                        ? [
-                              {
-                                  src: bookImageUrl,
-                                  alt: bookTitle,
-                              },
-                          ]
-                        : undefined,
-                    description: processedDescription,
-                });
+                const publicationDate = publishDateMatch?.[2];
+                const publishDate =
+                    publicationDate && /^\d{4}-\d{2}-\d{2}$/.test(publicationDate) && Number.isFinite(parseDate(publicationDate, 'YYYY-MM-DD', true).getTime()) ? parseDate(`${publicationDate}T00:00:00+08:00`) : undefined;
 
                 return {
-                    renderedDescription,
+                    processedDescription,
                     publishDate,
                 };
-            })) as { renderedDescription: string; publishDate: string };
+            });
+
+            const renderedDescription = renderDescription({
+                images: bookImageUrl
+                    ? [
+                          {
+                              src: bookImageUrl,
+                              alt: bookTitle,
+                          },
+                      ]
+                    : undefined,
+                description: processedDescription,
+            });
 
             return {
                 title: bookTitle,
@@ -96,7 +104,6 @@ async function handler(ctx) {
                 pubDate: publishDate,
                 content: {
                     html: renderedDescription,
-                    text: bookTitle,
                 },
             };
         });
@@ -104,7 +111,6 @@ async function handler(ctx) {
     return {
         title: `幾米 - 幾米創作(${language})`,
         link: `${baseUrl}/${language}/Books`,
-        allowEmpty: true,
         item: await Promise.all(bookItems),
     };
 }

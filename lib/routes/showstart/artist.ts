@@ -34,13 +34,12 @@ export const route: Route = {
 async function handler(ctx: Context): Promise<Data> {
     const id = ctx.req.param('id');
     const artist = await fetchPerformerInfo({
-        performerId: id,
+        performerId: id!,
     });
     return {
         title: `${TITLE} - ${artist.name}`,
         description: artist.content,
         link: `${HOST}/artist/${artist.id}`,
         item: artist.activityList,
-        allowEmpty: true,
     };
 }

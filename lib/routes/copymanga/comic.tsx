@@ -7,6 +7,7 @@ import type { Route } from '@/types';
 import cache from '@/utils/cache';
 import ofetch from '@/utils/ofetch';
 import { parseDate } from '@/utils/parse-date';
+import { collectInSeries } from '@/utils/sequence';
 
 export const route: Route = {
     path: '/comic/:id/:chapterCnt?',
@@ -41,35 +42,24 @@ async function handler(ctx) {
     const chapterArray = await cache.tryGet(
         strBaseUrl,
         async () => {
-            let bHasNextPage: boolean;
-            let chapters = [];
-            let iReqOffSet = 0;
-
-            do {
-                bHasNextPage = false;
-                // eslint-disable-next-line no-await-in-loop
-                const data = await ofetch(strBaseUrl, {
+            let chapters: any[] = await collectInSeries<number, any>(0, async (offset) => {
+                const { code, results } = await ofetch(strBaseUrl, {
                     headers: {
                         platform: '',
                     },
                     query: {
                         limit: iReqLimit,
-                        offset: iReqOffSet,
+                        offset,
                     },
                 });
-                const { code, results } = data;
-
                 if (code !== 200) {
-                    break;
+                    return { items: [] };
                 }
-
-                if (results.limit + results.offset < results.total) {
-                    bHasNextPage = true;
-                }
-                iReqOffSet += iReqLimit;
-
-                chapters = [...chapters, ...results.list];
-            } while (bHasNextPage);
+                return {
+                    items: results.list,
+                    next: results.limit + results.offset < results.total ? offset + iReqLimit : undefined,
+                };
+            });
 
             chapters = chapters
                 .map(({ comic_path_word, uuid, name, size, datetime_created, ordered /* , index*/ }) => ({

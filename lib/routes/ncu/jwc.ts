@@ -1,9 +1,10 @@
 import { load } from 'cheerio';
+import pMap from 'p-map';
 
 import type { Data, Route } from '@/types';
 import cache from '@/utils/cache';
 import ofetch from '@/utils/ofetch';
-import { parseDate } from '@/utils/parse-date';
+import { parseDateInTimezone } from '@/utils/parse-date-in-timezone';
 
 const baseUrl = 'https://jwc.ncu.edu.cn';
 
@@ -32,7 +33,7 @@ export const route: Route = {
     url: 'jwc.ncu.edu.cn/Notices.jsp',
 };
 
-async function handler() {
+async function handler(): Promise<Data> {
     const targetUrl = `${baseUrl}/Notices.jsp?urltype=tree.TreeTempUrl&wbtreeid=1541`;
 
     const response = await ofetch(targetUrl);
@@ -42,45 +43,31 @@ async function handler() {
         .toArray()
         .map((item) => {
             const el = $(item);
-            const linkEl = el.find('a').first();
+            const linkEl = el.find('a');
 
-            const title = linkEl.find('span.text-gray-700').text().trim() || linkEl.text().trim();
+            const titleText = linkEl.find('span.text-gray-700').text();
+            const title = titleText.trim() ? titleText : linkEl.text();
             const rawLink = linkEl.attr('href');
             const link = rawLink ? new URL(rawLink, baseUrl).href : '';
 
-            const dateText = el
-                .find(String.raw`.font-mono span.md\:inline`)
-                .text()
-                .trim();
+            const dateText = el.find(String.raw`.font-mono span.md\:inline`).text();
 
             return {
                 title,
                 link,
-                pubDate: dateText ? parseDate(dateText, 'YYYY-MM-DD') : undefined,
+                pubDate: dateText ? parseDateInTimezone(dateText, 8) : undefined,
             };
         })
         .filter((item) => item.title && item.link);
 
-    const items = await Promise.all(
-        list.map((item) =>
+    const items = await pMap(
+        list,
+        (item) =>
             cache.tryGet(item.link, async () => {
                 const detailResponse = await ofetch(item.link);
                 const $detail = load(detailResponse);
 
                 const contentEl = $detail('.v_news_content');
-
-                contentEl.find('a').each((_, el) => {
-                    const href = $detail(el).attr('href');
-                    if (href && !href.startsWith('http')) {
-                        $detail(el).attr('href', new URL(href, baseUrl).href);
-                    }
-                });
-                contentEl.find('img').each((_, el) => {
-                    const src = $detail(el).attr('src');
-                    if (src && !src.startsWith('http')) {
-                        $detail(el).attr('src', new URL(src, baseUrl).href);
-                    }
-                });
 
                 let description = contentEl.html() || '';
 
@@ -90,17 +77,18 @@ async function handler() {
                     attachments.each((_, el) => {
                         const href = $detail(el).attr('href');
                         const text = $detail(el).text().trim();
-                        if (href && text) {
-                            const absoluteHref = href.startsWith('http') ? href : new URL(href, baseUrl).href;
-                            description += `<li><a href="${absoluteHref}">${text}</a></li>`;
+                        if (!href || !text) {
+                            return;
                         }
+
+                        description += `<li><a href="${href}">${text}</a></li>`;
                     });
                     description += '</ul>';
                 }
 
                 return { ...item, description };
-            })
-        )
+            }),
+        { concurrency: 6 }
     );
 
     return {
@@ -108,5 +96,5 @@ async function handler() {
         link: targetUrl,
         description: '南昌大学教务处通知公告',
         item: items,
-    } as Data;
+    };
 }

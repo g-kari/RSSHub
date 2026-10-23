@@ -40,23 +40,16 @@ async function handler() {
 
             const data = response.data;
             const $ = load(data);
-            const tmp = $('.list2')[0].children;
-            const infos = [];
-            for (const element of tmp) {
-                if (element.children) {
-                    infos.push(element);
-                }
-            }
+            const infos = $('.list2').first().children().toArray();
 
             // only read first page
             return infos.map((item) => {
-                item = $(item);
+                const $item = $(item);
                 return {
-                    title: item.find('a').attr('title'),
-                    description: item.find('a').attr('title'),
-                    link: 'https://itsc.nju.edu.cn' + item.find('a').attr('href'),
-                    pubDate: timezone(parseDate(item.find('.news_meta').text(), 'YYYY-MM-DD'), +8),
-                    category: category_dict[0],
+                    title: $item.find('a').attr('title')!,
+                    link: 'https://itsc.nju.edu.cn' + $item.find('a').attr('href'),
+                    pubDate: timezone(parseDate($item.find('.news_meta').text(), 'YYYY-MM-DD'), 8),
+                    category: category_dict.tzgg,
                 };
             });
         })

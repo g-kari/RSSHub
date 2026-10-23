@@ -3,11 +3,13 @@ import type { SearchParams } from 'narou';
 import { Genre, GenreNotation, NarouNovelFetch, SearchBuilder } from 'narou';
 
 import InvalidParameterError from '@/errors/types/invalid-parameter';
-import type { Data, DataItem, Route } from '@/types';
+import type { Data, Route } from '@/types';
+import { getRouteLimit } from '@/utils/route-limit';
 
 import { handleIsekaiRanking } from './ranking-isekai';
 import { renderDescription } from './templates/description';
 import { IsekaiCategory, isekaiCategoryToJapanese, NovelType, novelTypeToJapanese, periodToJapanese, periodToOrder, RankingPeriod, RankingType } from './types/ranking';
+import { getNovelDates } from './utils';
 
 const getParameters = () => {
     // Generate ranking type options
@@ -30,12 +32,10 @@ const getParameters = () => {
     }));
 
     // Generate genre options
-    const genreOptions = Object.entries(Genre)
-        .filter(([, value]) => typeof value === 'number') // Filter out reverse mappings
-        .map(([key, value]) => ({
-            value: value.toString(),
-            label: key,
-        }));
+    const genreOptions = Object.entries(Genre).map(([key, value]) => ({
+        value: value.toString(),
+        label: key,
+    }));
 
     // Generate isekai category options
     const isekaiOptions = Object.entries(IsekaiCategory).map(([key, value]) => ({
@@ -91,7 +91,7 @@ const getBest5RadarItems = () => {
 
     // Genre
     const genreRankings = Object.entries(Genre)
-        .filter(([, value]) => typeof value === 'number' && value !== Genre.SonotaReplay && value !== Genre.NonGenre)
+        .filter(([, value]) => value !== Genre.SonotaReplay && value !== Genre.NonGenre)
         .map(([, value]) => ({
             title: `[${periodToJapanese.daily}] ${GenreNotation[value]}ランキング BEST5`,
             source: ['yomou.syosetu.com/rank/top/'],
@@ -180,31 +180,25 @@ When multiple works have the same points, their order may differ from syosetu's 
     ],
 };
 
-function parseGeneralRankingType(type: string): { period: RankingPeriod; novelType: NovelType } {
-    const [periodStr, novelTypeStr] = type.split('_');
+const isRankingPeriod = (value: string): value is RankingPeriod => Object.values<string>(RankingPeriod).includes(value);
+const isNovelType = (value: string): value is NovelType => Object.values<string>(NovelType).includes(value);
+const isGenre = (value: number): value is Genre => Object.values<number>(Genre).includes(value);
 
-    const period = periodStr as RankingPeriod;
-    const novelType = novelTypeStr as NovelType;
+function parseGeneralRankingType(type: string) {
+    const [period, novelType] = type.split('_', 2);
 
-    const isValid = [Object.values(RankingPeriod).includes(period), Object.values(NovelType).includes(novelType)].every(Boolean);
-
-    if (!isValid) {
+    if (!isRankingPeriod(period) || !isNovelType(novelType)) {
         throw new InvalidParameterError(`Invalid general ranking type: ${type}`);
     }
 
     return { period, novelType };
 }
 
-function parseGenreRankingType(type: string): { period: RankingPeriod; genre: number; novelType: NovelType } {
-    const [periodStr, genreStr, novelTypeStr = NovelType.TOTAL] = type.split('_');
+function parseGenreRankingType(type: string) {
+    const [period, genreStr, novelType = NovelType.TOTAL] = type.split('_', 3);
+    const genre = Number(genreStr);
 
-    const period = periodStr as RankingPeriod;
-    const genre = Number(genreStr) as Genre;
-    const novelType = novelTypeStr as NovelType;
-
-    const isValid = [Object.values(RankingPeriod).includes(period), Object.values(Genre).includes(genre), Object.values(NovelType).includes(novelType), genre !== Genre.SonotaReplay, genre !== Genre.NonGenre].every(Boolean);
-
-    if (!isValid) {
+    if (!isRankingPeriod(period) || !isGenre(genre) || !isNovelType(novelType) || genre === Genre.SonotaReplay || genre === Genre.NonGenre) {
         throw new InvalidParameterError(`Invalid genre ranking type: ${type}`);
     }
 
@@ -213,8 +207,7 @@ function parseGenreRankingType(type: string): { period: RankingPeriod; genre: nu
 
 async function handler(ctx: Context): Promise<Data> {
     const { listType, type } = ctx.req.param();
-    const rankingType = listType as RankingType;
-    const limit = Math.min(Number(ctx.req.query('limit') ?? 300), 300);
+    const limit = Math.min(getRouteLimit(ctx, 300), 300);
 
     const api = new NarouNovelFetch();
     const searchParams: SearchParams = {
@@ -226,7 +219,7 @@ async function handler(ctx: Context): Promise<Data> {
     let rankingTitle: string;
 
     // Build search parameters and titles based on ranking type
-    switch (rankingType) {
+    switch (listType) {
         case RankingType.LIST: {
             const { period, novelType } = parseGeneralRankingType(type);
             rankingUrl = `https://yomou.syosetu.com/rank/list/type/${type}`;
@@ -245,7 +238,7 @@ async function handler(ctx: Context): Promise<Data> {
             rankingTitle = `[${periodToJapanese[period]}] ${GenreNotation[genre]}ランキング - ${novelTypeToJapanese[novelType]} BEST${limit}`;
 
             searchParams.order = periodToOrder[period];
-            searchParams.genre = genre as Genre;
+            searchParams.genre = genre;
             if (novelType !== NovelType.TOTAL) {
                 searchParams.type = novelType;
             }
@@ -264,16 +257,18 @@ async function handler(ctx: Context): Promise<Data> {
 
     const items = result.values.map((novel, index) => ({
         title: `#${index + 1} ${novel.title}`,
-        link: `https://ncode.syosetu.com/${String(novel.ncode).toLowerCase()}`,
+        link: `https://ncode.syosetu.com/${novel.ncode.toLowerCase()}`,
         description: renderDescription({ novel }),
+        ...getNovelDates(novel),
         author: novel.writer,
-        category: novel.keyword.split(/[\s/\uFF0F]/).filter(Boolean),
+        category: novel.keyword.split(/[\s/\u{FF0F}]/u).filter(Boolean),
     }));
 
     return {
         title: `小説家になろう - ${rankingTitle}`,
         link: rankingUrl,
-        item: items as DataItem[],
+        item: items,
+        sortItems: false,
         language: 'ja',
     };
 }

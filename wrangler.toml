@@ -1,7 +1,13 @@
+# Keep the fork on its existing BROWSER and CACHE bindings; no new resources or migrations.
 name = "rsshub"
 main = "dist-worker/worker.mjs"
-compatibility_date = "2025-06-17"
-compatibility_flags = ["nodejs_compat"]
+compatibility_date = "2026-09-01"
+# No nodejs_compat needed, read https://developers.cloudflare.com/workers/runtime-apis/nodejs/#get-started
+compatibility_flags = ["global_fetch_strictly_public"]
+
+find_additional_modules = true
+base_dir = "dist-worker/modules"
+rules = [{ type = "Data", globs = ["data_files/**"], fallthrough = true }]
 
 # Serve static assets from lib/assets
 assets = { directory = "lib/assets" }

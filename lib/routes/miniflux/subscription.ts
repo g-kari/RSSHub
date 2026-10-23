@@ -1,7 +1,10 @@
+import { escapeUTF8 } from 'entities/escape';
+
 import { config } from '@/config';
 import ConfigNotFoundError from '@/errors/types/config-not-found';
 import type { Route } from '@/types';
 import got from '@/utils/got';
+import { parseDate } from '@/utils/parse-date';
 
 export const route: Route = {
     path: '/subscription/:parameters?',
@@ -52,23 +55,23 @@ async function handler(ctx) {
         const filter = item.slice(0, item.indexOf('='));
         const option = item.slice(item.lastIndexOf('=') + 1);
         if (filter.search('categor') !== -1) {
-            option.split(',').map((item) => categories.push(item.toString().toLowerCase()));
+            categories.push(...option.split(',').map((item) => item.toString().toLowerCase()));
             return filter;
         }
         if (filter.search('feed') === -1) {
             return '';
-        } else {
-            option.split(',').map((item) => feeds.push(item.toString().toLowerCase()));
-            return filter;
         }
+        feeds.push(...option.split(',').map((item) => item.toString().toLowerCase()));
+        return filter;
     }
 
     function addFeed(item) {
         subscription.push({
             title: item.title,
             link: item.site_url,
-            pubData: item.last_modified_header,
-            description: `Feed URL: <a href=${item.feed_url}>${item.feed_url}</a>`,
+            guid: `miniflux:${instance}:feed:${item.id}`,
+            pubDate: item.last_modified_header ? parseDate(item.last_modified_header) : undefined,
+            description: `Feed URL: <a href="${escapeUTF8(item.feed_url)}">${escapeUTF8(item.feed_url)}</a>`,
         });
     }
 
@@ -76,9 +79,9 @@ async function handler(ctx) {
         headers: { 'X-Auth-Token': token },
     });
 
-    const subscription = [];
-    const categories = [];
-    const feeds = [];
+    const subscription: any[] = [];
+    const categories: any[] = [];
+    const feeds: any[] = [];
     const feedsList = response.data;
 
     const parameters = ctx.req
@@ -122,6 +125,5 @@ async function handler(ctx) {
         link: instance,
         description: 'A subscription tracking feed.',
         item: subscription,
-        allowEmpty: true,
     };
 }

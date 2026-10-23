@@ -1,6 +1,9 @@
 import { load } from 'cheerio';
 import CryptoJS from 'crypto-js';
+import { getMimeType } from 'hono/utils/mime';
 
+import type { DataItem } from '@/types';
+import cache from '@/utils/cache';
 import got from '@/utils/got';
 import { parseDate } from '@/utils/parse-date';
 
@@ -16,6 +19,8 @@ const apiMomentRootUrl = `https://moment-api.${domain}`;
 const apiSearchRootUrl = `https://search-api.${domain}`;
 const siteTitle = '虎嗅';
 
+type ItemEnclosure = Pick<DataItem, 'enclosure_length' | 'enclosure_type' | 'enclosure_url' | 'itunes_duration' | 'itunes_item_image'>;
+
 /**
  * Cleans up HTML data by removing specific elements and attributes.
  *
@@ -28,42 +33,61 @@ const cleanUpHTML = (data) => {
     $('div.neirong-shouquan').remove();
     $('em.vote__bar, div.vote__btn, div.vote__time').remove();
     $('p img').each((_, e) => {
-        e = $(e);
-        if ((e.prop('src') ?? e.prop('_src')) !== undefined) {
-            e.parent().replaceWith(
+        const $e = $(e);
+        const src = $e.prop('src') || $e.prop('_src');
+        if (src) {
+            const paragraph = $e.closest('p')[0];
+            if (paragraph && 'tagName' in paragraph) {
+                paragraph.tagName = 'div';
+            }
+            $e.replaceWith(
                 renderDescription({
                     image: {
-                        src: (e.prop('src') ?? e.prop('_src')).split(/\?/)[0],
-                        width: e.prop('data-w'),
-                        height: e.prop('data-h'),
+                        src: src.split(/\?/, 1)[0],
+                        width: $e.prop('data-w'),
+                        height: $e.prop('data-h'),
                     },
                 })
             );
+        } else {
+            $e.remove();
         }
     });
     $('p, span').each((_, e) => {
-        e = $(e);
-        if (e.contents().length === 1 && /^\s*$/.test(e.text())) {
-            e.remove();
+        const $e = $(e);
+        if ($e.contents().length === 1 && /^\s*$/.test($e.text())) {
+            $e.remove();
         } else {
-            e.removeClass();
-            e.removeAttr('data-check-id label class');
+            $e.removeClass();
+            $e.removeAttr('data-check-id label class');
         }
     });
     $('.text-big-title').each((_, e) => {
         e.tagName = 'h3';
-        e = $(e);
-        e.removeClass();
-        e.removeAttr('class');
+        const $e = $(e);
+        $e.removeClass();
+        $e.removeAttr('class');
     });
     $('.text-sm-title').each((_, e) => {
         e.tagName = 'h4';
-        e = $(e);
-        e.removeClass();
-        e.removeAttr('class');
+        const $e = $(e);
+        $e.removeClass();
+        $e.removeAttr('class');
     });
 
     return $.html();
+};
+
+const parsePublicationDate = (value: string | number | undefined) => {
+    if (([undefined, null, ''] as unknown[]).includes(value)) {
+        return;
+    }
+    const timestamp = Number(value);
+    if (!Number.isFinite(timestamp) || timestamp <= 0) {
+        return;
+    }
+    const date = parseDate(timestamp, 'X');
+    return Number.isFinite(date.getTime()) ? date : undefined;
 };
 
 const normalizeText = (value?: string) => {
@@ -86,7 +110,6 @@ const buildRouteData = ({ title, link, description, image, icon, subtitle, autho
     author,
     itunes_author: author,
     itunes_category: 'News',
-    allowEmpty: true,
 });
 
 const prefixValue = (value?: string, prefix?: string) => {
@@ -154,11 +177,11 @@ const fetchApiRouteData = async <T>({
         descriptionPrefix?: string;
     };
 }) => {
-    const { data: response } = await got.post(apiUrl, { form });
+    const { data: response }: { data: { data: T } } = await got.post(apiUrl, { form });
 
     return buildFeedMetadata({
         link: currentUrl,
-        ...mapData(response.data as T),
+        ...mapData(response.data),
     });
 };
 
@@ -180,29 +203,31 @@ const extractBriefId = (link: string) => {
     return pathname.match(/^\/brief\/(\d+)\.html$/)?.[1];
 };
 
-const fetchArticleDetail = async (aid: string) => {
-    const apiUrl = new URL('web/article/detail', apiArticleRootUrl).href;
-    const { data: response } = await got.post(apiUrl, {
-        form: {
-            platform: 'www',
-            aid,
-        },
+const fetchArticleDetail = (aid: string) =>
+    cache.tryGet(`huxiu:article-detail:${aid}`, async () => {
+        const apiUrl = new URL('web/article/detail', apiArticleRootUrl).href;
+        const { data: response } = await got.post(apiUrl, {
+            form: {
+                platform: 'www',
+                aid,
+            },
+        });
+
+        return response.data;
     });
 
-    return response.data;
-};
+const fetchBriefDetail = (briefId: string) =>
+    cache.tryGet(`huxiu:brief-detail:${briefId}`, async () => {
+        const apiUrl = new URL('v1/brief/detail', apiClubRootUrl).href;
+        const { data: response } = await got.post(apiUrl, {
+            form: {
+                platform: 'www',
+                brief_id: briefId,
+            },
+        });
 
-const fetchBriefDetail = async (briefId: string) => {
-    const apiUrl = new URL('v1/brief/detail', apiClubRootUrl).href;
-    const { data: response } = await got.post(apiUrl, {
-        form: {
-            platform: 'www',
-            brief_id: briefId,
-        },
+        return response.data;
     });
-
-    return response.data;
-};
 
 const buildBriefCategories = (data) => [data.brief_column?.name, data.club_info?.name, ...(data.brief?.tags_info?.map((c) => c.name) ?? [])].filter(Boolean);
 
@@ -221,7 +246,7 @@ const fetchMemberData = async (id: string, type: string, items, titlePrefix?: st
             const detail = await fetchArticleDetail(firstArticleId);
             const username = detail.user_info?.username ?? detail.author;
             const description = detail.user_info?.yijuhua ?? `${username ?? `用户 ${id}`}的${type === 'moment' ? '24 小时' : '文章'}`;
-            const image = detail.user_info?.avatar?.split(/\?/)[0];
+            const image = detail.user_info?.avatar?.split(/\?/, 1)[0];
 
             return buildFeedMetadata({
                 title: username ?? `用户 ${id}`,
@@ -273,7 +298,7 @@ const fetchItem = async (item) => {
         const { brief, brief_column: briefColumn, club_info: clubInfo } = data;
         const briefAudioInfo = processAudioInfo(brief.audio_info);
         const audio = briefAudioInfo.processed;
-        const audioItem: Record<string, unknown> = briefAudioInfo.processedItem ?? {};
+        const audioItem: ItemEnclosure = briefAudioInfo.processedItem ?? {};
         const body = [brief.preface, brief.content, brief.peroration].filter(Boolean).join('');
 
         return {
@@ -286,15 +311,15 @@ const fetchItem = async (item) => {
             }),
             author: buildBriefAuthor(data) ?? item.author,
             category: buildBriefCategories({ brief, brief_column: briefColumn, club_info: clubInfo }),
-            pubDate: parseDate(brief.publish_time, 'X'),
-            upvotes: Number.parseInt(brief.agree_num ?? item.upvotes ?? 0, 10),
-            comments: Number.parseInt(brief.total_comment_num ?? brief.comment_num ?? item.comments ?? 0, 10),
+            pubDate: parsePublicationDate(brief.publish_time),
+            upvotes: Number(brief.agree_num ?? item.upvotes ?? 0),
+            comments: Number(brief.total_comment_num ?? brief.comment_num ?? item.comments ?? 0),
         };
     }
 
     const articleAudioInfo = processAudioInfo(data.audio_info);
     const audio = articleAudioInfo.processed;
-    const audioItem: Record<string, unknown> = articleAudioInfo.processedItem ?? {};
+    const audioItem: ItemEnclosure = articleAudioInfo.processedItem ?? {};
 
     if (Object.keys(audioItem).length !== 0) {
         audioItem.itunes_item_image = data.pic_path ?? data.share_info?.share_img ?? undefined;
@@ -315,14 +340,14 @@ const fetchItem = async (item) => {
             video,
             audio,
             preface: preface ? cleanUpHTML(preface) : undefined,
-            summary: data.summary,
+            summary: content ? undefined : data.summary,
             description: content ? cleanUpHTML(content) : undefined,
         }),
         author: data.user_info?.username ?? item.author,
         category: buildCategories(data),
-        pubDate: parseDate(data.dateline ?? data.publish_time, 'X'),
-        upvotes: Number.parseInt(data.agreenum ?? item.upvotes ?? 0, 10),
-        comments: Number.parseInt(data.commentnum ?? data.total_comment_num ?? item.comments ?? 0, 10),
+        pubDate: parsePublicationDate(data.dateline ?? data.publish_time),
+        upvotes: Number(data.agreenum ?? item.upvotes ?? 0),
+        comments: Number(data.commentnum ?? data.total_comment_num ?? item.comments ?? 0),
     };
 };
 
@@ -353,6 +378,8 @@ const generateSignature = () => {
 
     const appSecret = 'hUzaABtNfDE-6UiyaYhfsmjW-8dnoyVc';
     const nonce = generateNonce();
+    // server-validated signature relies on JS default codepoint sort; localeCompare reorders mixed-case nonce vs lowercase appSecret
+    // oxlint-disable-next-line unicorn-js/require-array-sort-compare
     const r = [appSecret, timestamp, nonce].toSorted();
     return {
         nonce,
@@ -361,7 +388,12 @@ const generateSignature = () => {
     };
 };
 
-const audioQualities = ['', 'low'];
+const audioQualities = [
+    { path: 'path', size: 'size' },
+    { path: 'audio_path', size: 'audio_size' },
+    { path: 'low_path', size: 'low_size' },
+    { path: 'audio_low_path', size: 'audio_low_size' },
+];
 
 /**
  * Processes the audio information and returns the processed data.
@@ -370,7 +402,7 @@ const audioQualities = ['', 'low'];
  * @returns {Object} - An object containing the processed audio data.
  */
 const processAudioInfo = (info) => {
-    const quality = info ? audioQualities.find((quality) => Object.hasOwn(info, `audio_${quality === '' ? '' : `${quality}_`}path`)) : undefined;
+    const quality = info ? audioQualities.find((quality) => typeof info[quality.path] === 'string' && info[quality.path]) : undefined;
 
     if (quality === undefined) {
         return {
@@ -379,14 +411,14 @@ const processAudioInfo = (info) => {
         };
     }
 
-    const linkKey = `audio_${quality}path`;
-    const sizeKey = `audio_${quality}size`;
+    const linkKey = quality.path;
+    const sizeKey = quality.size;
 
     const processed = {
         duration: info.format_length_new ?? info.format_length,
         size: Object.hasOwn(info, sizeKey) ? info[sizeKey] : undefined,
         src: info[linkKey],
-        type: `audio/${info[linkKey].split(/\./).pop()}`,
+        type: getMimeType(new URL(info[linkKey], rootUrl).pathname)?.split(';', 1)[0],
     };
 
     const processedItem = {
@@ -441,9 +473,9 @@ const resolveItemIdentifiers = (item): { guid: string; link: string } | null => 
  * @returns {Object} - Object with upvotes, downvotes, and comments.
  */
 const extractCounts = (item) => ({
-    upvotes: Number.parseInt(item.count_info?.agree ?? item.count_info?.favtimes ?? item.agree_num ?? 0, 10),
-    downvotes: Number.parseInt(item.count_info?.disagree ?? 0, 10),
-    comments: Number.parseInt(item.count_info?.total_comment_num ?? item.count_info?.commentnum ?? item.total_comment_num ?? item.commentnum ?? 0, 10),
+    upvotes: Number(item.count_info?.agree ?? item.count_info?.favtimes ?? item.agree_num ?? 0),
+    downvotes: Number(item.count_info?.disagree ?? 0),
+    comments: Number(item.count_info?.total_comment_num ?? item.count_info?.commentnum ?? item.total_comment_num ?? item.commentnum ?? 0),
 });
 
 /**
@@ -460,7 +492,7 @@ const extractAuthor = (item) => item.user_info?.username ?? item.brief_column?.n
  * @param {Object} item - The item to extract image from.
  * @returns {string|undefined} - The image URL or undefined.
  */
-const extractImageSrc = (item) => item.origin_pic_path ?? item.pic_path ?? item.big_pic_path?.split(/\?/)[0];
+const extractImageSrc = (item) => item.origin_pic_path ?? item.pic_path ?? item.big_pic_path?.split(/\?/, 1)[0];
 
 /**
  * Maps a single item to a processed item object.
@@ -476,7 +508,7 @@ const mapItem = (item) => {
 
     const mappedAudioInfo = processAudioInfo(item.audio_info);
     const audio = mappedAudioInfo.processed;
-    const audioItem: Record<string, unknown> = mappedAudioInfo.processedItem ?? {};
+    const audioItem: ItemEnclosure = mappedAudioInfo.processedItem ?? {};
 
     if (Object.keys(audioItem).length !== 0) {
         audioItem.itunes_item_image = item.pic_path ?? item.share_info?.share_img ?? undefined;
@@ -499,7 +531,7 @@ const mapItem = (item) => {
         }),
         author: extractAuthor(item),
         guid: identifiers.guid,
-        pubDate: timestamp ? parseDate(timestamp, 'X') : undefined,
+        pubDate: parsePublicationDate(timestamp),
         ...counts,
     };
 };
@@ -509,28 +541,21 @@ const mapItem = (item) => {
  *
  * @param {Object[]} items - The items to process.
  * @param {number} limit - The maximum number of items to process.
- * @param {Function} tryGet   - The tryGet function that handles the retrieval process.
  * @returns {Promise<Object[]>} - A promise that resolves to an array of processed items.
  */
-const processItems = async (items, limit, tryGet) => {
+const processItems = async (items, limit) => {
     const processedItems = items
         .map((item) => mapItem(item))
         .filter(Boolean)
         .slice(0, limit);
 
     return await Promise.all(
-        processedItems.map((item) =>
-            tryGet(item.guid, async () => {
-                const isExternalLink = !new RegExp(domain, 'i').test(new URL(item.link).hostname);
-                const isMoment = item.guid.startsWith('huxiu-moment');
+        processedItems.map((item) => {
+            const isExternalLink = !new RegExp(domain, 'i').test(new URL(item.link).hostname);
+            const isMoment = item.guid.startsWith('huxiu-moment');
 
-                if (isExternalLink || isMoment) {
-                    return item;
-                }
-
-                return await fetchItem(item);
-            })
-        )
+            return isExternalLink || isMoment ? item : fetchItem(item);
+        })
     );
 };
 
@@ -560,7 +585,7 @@ const processVideoInfo = (info) => {
         poster: info.cover ?? info.custom_cover_path ?? info.gif_path,
         size: Object.hasOwn(info, sizeKey) ? info[sizeKey] : undefined,
         src: info[linkKey],
-        type: `video/${info[linkKey].split(/\./).pop()}`,
+        type: getMimeType(new URL(info[linkKey], rootUrl).pathname)?.split(';', 1)[0],
     };
 
     const processedItem = {

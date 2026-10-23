@@ -1,10 +1,22 @@
 import type { CheerioAPI } from 'cheerio';
 import { load } from 'cheerio';
+import type { Context } from 'hono';
 import { raw } from 'hono/html';
 import { renderToString } from 'hono/jsx/dom/server';
 import type { JSX } from 'hono/jsx/jsx-runtime';
 
+import type { DataItem } from '@/types';
 import ofetch from '@/utils/ofetch';
+import { getRouteLimit } from '@/utils/route-limit';
+
+export const limitBbcItems = <T extends Pick<DataItem, 'pubDate'>>(items: T[], ctx: Context): T[] => {
+    const limit = getRouteLimit(ctx);
+    if (limit === undefined) {
+        return items;
+    }
+    const sortedItems = ctx.req.query('sorted') === 'false' ? items : items.toSorted((a, b) => +new Date(b.pubDate || 0) - +new Date(a.pubDate || 0));
+    return sortedItems.slice(0, limit);
+};
 
 type BlockAttribute = 'bold' | 'italic';
 
@@ -50,7 +62,8 @@ type Block = {
 
 const applyAttributes = (content: JSX.Element | string, attributes?: BlockAttribute[]): JSX.Element | string => {
     let result: JSX.Element | string = content;
-    for (const attribute of attributes ?? []) {
+    const attributeList = attributes ?? [];
+    for (const attribute of attributeList) {
         switch (attribute) {
             case 'bold':
                 result = <strong>{result}</strong>;
@@ -294,10 +307,11 @@ const renderEmbedImages = (block: Block, index: number): JSX.Element | null => {
         const rawImageBlock = findBlocksByType(imageBlock.model?.blocks ?? imageBlock.blocks ?? imageBlock.items, 'rawImage')[0];
         const width = rawImageBlock?.model?.width;
 
-        if (width && width > maxWidth) {
-            maxWidth = width;
-            largestImage = imageBlock;
+        if (!(width && width > maxWidth)) {
+            continue;
         }
+        maxWidth = width;
+        largestImage = imageBlock;
     }
 
     if (!largestImage) {
@@ -355,7 +369,7 @@ export const extractInitialData = ($: CheerioAPI): any => {
     const initialDataText = JSON.parse(
         $('script:contains("window.__INITIAL_DATA__")')
             .text()
-            .match(/window\.__INITIAL_DATA__\s*=\s*(.*);/)?.[1] ?? '"{}"'
+            .match(/window\.__INITIAL_DATA__\s*=\s*(\S.*)?;/)?.[1] ?? '"{}"'
     );
 
     return JSON.parse(initialDataText);
@@ -375,7 +389,7 @@ const extractArticleWithInitialData = ($: CheerioAPI, item) => {
         };
     }
 
-    const article = Object.values(initialData.data).find((d) => d.name === 'article')?.data;
+    const article = Object.values<any>(initialData.data).find((d) => d.name === 'article')?.data;
     const topics = Array.isArray(article?.topics) ? article.topics : [];
     const blocks = article?.content?.model?.blocks;
 
@@ -388,6 +402,8 @@ const extractArticleWithInitialData = ($: CheerioAPI, item) => {
 export const fetchBbcContent = async (link: string, item) => {
     const response = await ofetch.raw(link, {
         retryStatusCodes: [403],
+        // BBC may reject HTTP/2 requests that succeed over HTTP/1.1.
+        allowH2: false,
     });
     const $ = load(response._data);
     const { hostname, pathname } = new URL(response.url);

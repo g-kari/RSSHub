@@ -22,7 +22,7 @@ export const route: Route = {
     radar: [
         {
             source: ['zhuanlan.zhihu.com/:id'],
-            target: '/zhuanlan/:id',
+            target: '/xhu/zhuanlan/:id',
         },
     ],
     name: 'xhu- 专栏',
@@ -31,7 +31,7 @@ export const route: Route = {
 };
 
 async function handler(ctx) {
-    const xhuCookie = await auth.getCookie(ctx);
+    const xhuCookie = await auth.getCookie();
     const id = ctx.req.param('id');
     const link = `https://www.zhihu.com/column/${id}`;
 

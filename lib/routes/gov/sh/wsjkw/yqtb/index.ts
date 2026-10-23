@@ -5,7 +5,7 @@ import got from '@/utils/got';
 import { parseDate } from '@/utils/parse-date';
 
 export const route: Route = {
-    path: ['/sh/wsjkw/yqtb', '/shanghai/wsjkw/yqtb'],
+    path: '/wsjkw/yqtb',
     categories: ['government'],
     example: '/gov/sh/wsjkw/yqtb',
     parameters: {},
@@ -20,9 +20,14 @@ export const route: Route = {
     radar: [
         {
             source: ['wsjkw.sh.gov.cn/'],
+            target: '/wsjkw/yqtb',
+        },
+        {
+            source: ['wsjkw.sh.gov.cn/yqtb/index.html'],
+            target: '/wsjkw/yqtb',
         },
     ],
-    name: '上海卫健委 疫情通报',
+    name: '卫健委 疫情通报',
     maintainers: ['zcf0508'],
     handler,
     url: 'wsjkw.sh.gov.cn/',
@@ -38,11 +43,11 @@ async function handler() {
         title: '疫情通报-上海卫健委',
         link: url,
         item: list.toArray().map((item) => {
-            item = $(item);
-            const title = item.find('a').text();
-            const address = item.find('a').attr('href');
+            const $item = $(item);
+            const title = $item.find('a').text();
+            const address = $item.find('a').attr('href');
             const host = 'https://wsjkw.sh.gov.cn';
-            const pubDate = parseDate(item.find('span').text(), 'YYYY-MM-DD');
+            const pubDate = parseDate($item.find('span').text(), 'YYYY-MM-DD');
             return {
                 title,
                 description: title,

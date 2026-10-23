@@ -28,13 +28,13 @@ async function handler(ctx) {
     const { sport } = ctx.req.param();
     const link = `https://www.bbc.com/sport/${sport}`;
 
-    const response = await ofetch(link);
+    const response = await ofetch(link, { allowH2: false });
     const $ = load(response);
 
     const initialData = extractInitialData($);
     const { page } = initialData.stores.metadata;
 
-    const list: DataItem[] = Object.values(initialData.data)
+    const list: DataItem[] = Object.values<any>(initialData.data)
         .filter((d) => d.name === 'hierarchical-promo-collection' && d.props.title !== 'Elsewhere on the BBC')
         .flatMap((d) => d.data.promos)
         .map((item) => ({

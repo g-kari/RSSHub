@@ -2,11 +2,12 @@ import type { CheerioAPI } from 'cheerio';
 import { load } from 'cheerio';
 import type { Item } from 'rss-parser';
 
-import type { Route } from '@/types';
+import type { Data, Route } from '@/types';
 import { ViewType } from '@/types';
 import cache from '@/utils/cache';
 import ofetch from '@/utils/ofetch';
 import { parseDate } from '@/utils/parse-date';
+import { getRouteLimit } from '@/utils/route-limit';
 import parser from '@/utils/rss-parser';
 
 const baseUrl = 'https://www.apple.com.cn';
@@ -31,7 +32,7 @@ const extractArticleDescription = ($: CheerioAPI) => {
     return article.html() ?? undefined;
 };
 
-const fetchArticle = (item: Item & { link: string }) =>
+const fetchArticle = (item: Item & { link: string; author?: string }) =>
     cache.tryGet(item.link, async () => {
         const response = await ofetch(item.link);
         const $ = load(response);
@@ -53,14 +54,14 @@ const fetchArticle = (item: Item & { link: string }) =>
         };
     });
 
-async function handler(ctx) {
-    const limit = Math.max(Number.parseInt(ctx.req.query('limit') ?? '', 10) || defaultLimit, 1);
+async function handler(ctx): Promise<Data> {
+    const limit = getRouteLimit(ctx, defaultLimit);
     const feedResponse = await ofetch(feedUrl, {
         parseResponse: (text) => text,
     });
     const feed = await parser.parseString(feedResponse);
     const items = await Promise.all(
-        (feed.items as Item[])
+        feed.items
             .slice(0, limit)
             .filter((item): item is Item & { link: string } => Boolean(item.link))
             .map((item) => fetchArticle(item))

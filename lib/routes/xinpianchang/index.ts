@@ -1,5 +1,5 @@
 import type { Route } from '@/types';
-import cache from '@/utils/cache';
+import { getRouteLimit } from '@/utils/route-limit';
 
 import { getData, processItems, rootUrl } from './util';
 
@@ -28,15 +28,15 @@ export const route: Route = {
 
 async function handler(ctx) {
     const { params = 'article-0-0-all-all-0-0-score' } = ctx.req.param();
-    const limit = ctx.req.query('limit') ? Number.parseInt(ctx.req.query('limit'), 10) : 60;
+    const limit = getRouteLimit(ctx, 60);
 
     const currentUrl = new URL(`discover/${params}`, rootUrl).href;
 
-    const { data, response } = await getData(currentUrl, cache.tryGet);
+    const { data, response } = await getData(currentUrl);
 
-    let items = JSON.parse(response.match(/"list":(\[.*?]),"total"/)[1]);
+    let items = JSON.parse(response.match(/"list":(\[.*?\]),"total"/)[1]);
 
-    items = await processItems(items.slice(0, limit), cache.tryGet);
+    items = await processItems(items.slice(0, limit));
 
     return {
         ...data,

@@ -1,5 +1,6 @@
-import type { Route } from '@/types';
-import cache from '@/utils/cache';
+import pMap from 'p-map';
+
+import type { DataItem, Route } from '@/types';
 import got from '@/utils/got';
 
 import { renderDescription } from '../templates/description';
@@ -30,7 +31,7 @@ async function handler(ctx) {
 
     const { data: response } = await got(currentUrl);
 
-    const list = response.data.list.map((item) => ({
+    const list: Array<DataItem & { link: string }> = response.data.list.map((item) => ({
         title: '【' + item.media_nickname + '】' + item.title,
         description: renderDescription({
             thumb: item.titleimg,
@@ -41,7 +42,7 @@ async function handler(ctx) {
 
     const author = response.data.info ? response.data.info.name : '';
 
-    const items = await Promise.all(list.map((item) => parseArticle(item, cache.tryGet)));
+    const items = await pMap(list, (item) => parseArticle(item), { concurrency: 3 });
 
     return {
         title: `南方都市报奥一网 - ${author}`,

@@ -7,7 +7,7 @@ import ofetch from '@/utils/ofetch';
 import { parseDate } from '@/utils/parse-date';
 import timezone from '@/utils/timezone';
 
-const $get = async (url: string, encoding = 'gb2312') => new TextDecoder(encoding).decode(await ofetch(url, { responseType: 'arrayBuffer' }));
+const $get = async (url: string) => new TextDecoder('gb2312').decode(await ofetch(url, { responseType: 'arrayBuffer' }));
 const $trim = (str: string) => {
     let s = str.trim();
     s = s.startsWith('&nbsp;&nbsp;') ? s.slice(12) : s;
@@ -49,17 +49,17 @@ export const route: Route = {
 
         let items = $('tbody > .text-c:nth-child(-n+10)')
             .toArray()
-            .map((item) => {
+            .map((item): DataItem => {
                 const children = $(item).children();
                 const a = children.eq(2).find('a');
                 return {
                     category: [children.eq(1).text()],
                     link: `${baseUrl}/${a.attr('href')!}`,
                     title: a.children().first().text(),
-                    pubDate: timezone(parseDate(children.eq(3).text(), 'YYYY-M-D'), +8),
+                    pubDate: timezone(parseDate(children.eq(3).text(), 'YYYY-M-D'), 8),
                     author: children.eq(4).text(),
                     description: '请在应用内抓取全文内容',
-                } as DataItem;
+                };
             });
 
         if (detail) {

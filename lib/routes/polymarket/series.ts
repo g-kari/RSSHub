@@ -1,4 +1,6 @@
-import type { Route } from '@/types';
+import { escape } from 'entities/escape';
+
+import type { Data, Route } from '@/types';
 import ofetch from '@/utils/ofetch';
 import { parseDate } from '@/utils/parse-date';
 
@@ -13,7 +15,6 @@ export const route: Route = {
     parameters: {
         slug: {
             description: 'Series slug, e.g. nfl, nba, mlb. If omitted, lists all series.',
-            default: 'all',
         },
     },
     features: {
@@ -36,9 +37,8 @@ export const route: Route = {
     handler,
 };
 
-async function handler(ctx) {
+async function handler(ctx): Promise<Data> {
     const slug = ctx.req.param('slug');
-    const limit = 20;
 
     if (slug) {
         // Get specific series by slug
@@ -61,40 +61,42 @@ async function handler(ctx) {
             description: formatEventDescription(event),
             link: `https://polymarket.com/event/${event.slug}`,
             pubDate: event.startDate ? parseDate(event.startDate) : undefined,
-            category: event.tags?.map((t) => t.label).filter(Boolean) as string[],
+            category: event.tags?.map((t) => t.label).filter((label): label is string => Boolean(label)),
         }));
 
         return {
             title: `Polymarket Series - ${series.title}`,
             link: `https://polymarket.com/series/${series.slug}`,
             item: items,
-        };
-    } else {
-        // List all series
-        const data = await ofetch<Series[]>(`${GAMMA_API}/series`, {
-            query: {
-                limit,
-                order: 'volume',
-                ascending: false,
-            },
-        });
-
-        const items = data.map((series) => ({
-            title: series.title,
-            description: `
-                ${series.description ? `<p>${series.description}</p>` : ''}
-                <p><strong>Volume:</strong> $${Number(series.volume || 0).toLocaleString()}</p>
-                <p><strong>Liquidity:</strong> $${Number(series.liquidity || 0).toLocaleString()}</p>
-                ${series.image ? `<img src="${series.image}" alt="${series.title}" style="max-width: 100%;">` : ''}
-            `,
-            link: `https://polymarket.com/series/${series.slug}`,
-            pubDate: series.createdAt ? parseDate(series.createdAt) : undefined,
-        }));
-
-        return {
-            title: 'Polymarket - Series',
-            link: 'https://polymarket.com',
-            item: items,
+            language: 'en',
         };
     }
+    // List all series
+    const limit = 20;
+    const data = await ofetch<Series[]>(`${GAMMA_API}/series`, {
+        query: {
+            limit,
+            order: 'volume',
+            ascending: false,
+        },
+    });
+
+    const items = data.map((series) => ({
+        title: series.title,
+        description: `
+                ${series.description ? `<p>${escape(series.description)}</p>` : ''}
+                <p><strong>Volume:</strong> $${(series.volume || 0).toLocaleString()}</p>
+                <p><strong>Liquidity:</strong> $${(series.liquidity || 0).toLocaleString()}</p>
+                ${series.image ? `<img src="${escape(series.image)}" alt="${escape(series.title)}" style="max-width: 100%;">` : ''}
+            `,
+        link: `https://polymarket.com/series/${series.slug}`,
+        pubDate: series.createdAt ? parseDate(series.createdAt) : undefined,
+    }));
+
+    return {
+        title: 'Polymarket - Series',
+        link: 'https://polymarket.com',
+        item: items,
+        language: 'en',
+    };
 }

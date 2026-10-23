@@ -1,6 +1,7 @@
-import * as cheerio from 'cheerio';
+import { load } from 'cheerio';
+import pMap from 'p-map';
 
-import type { Route } from '@/types';
+import type { DataItem, Route } from '@/types';
 import cache from '@/utils/cache';
 import got from '@/utils/got';
 import { parseDate } from '@/utils/parse-date';
@@ -67,11 +68,11 @@ async function handler(ctx) {
     isValidType && url.searchParams.set('type', type);
 
     const { data: res } = await got(url);
-    const $ = cheerio.load(res);
+    const $ = load(res);
     const list = $('#ajaxtable > tbody:nth-child(2) .tr3')
         .not('.tr2.tac')
         .toArray()
-        .map((item) => {
+        .flatMap((item): DataItem[] => {
             const element = $(item);
 
             const tal = element.find('.tal');
@@ -81,32 +82,37 @@ async function handler(ctx) {
                 .text()
                 .trim();
             const a = tal.find('h3 a');
+            const href = a.attr('href');
+            if (!href) {
+                return [];
+            }
             const td3 = element.find('td:nth-child(3)');
 
-            return {
-                title: `${catalog} ${a.text()}`,
-                link: `${baseUrl}/${a.attr('href')}`,
-                author: td3.find('a').text(),
-                pubDate: parseDate(String(td3.find('span[data-timestamp]').data('timestamp')).slice(0, -1), 'X'),
-            };
+            return [
+                {
+                    title: `${catalog} ${a.text()}`,
+                    link: new URL(href, baseUrl).href,
+                    author: td3.find('a').text(),
+                    pubDate: parseDate(String(td3.find('span[data-timestamp]').data('timestamp')).slice(0, -1), 'X'),
+                },
+            ];
         });
 
-    const out = await Promise.all(
-        list.map((item) =>
-            cache.tryGet(item.link, async () => {
+    const out = await pMap(
+        list,
+        async (item) => {
+            const description = await cache.tryGet(`${item.link}:body:v2`, async () => {
                 const { data: response } = await got(item.link);
-
-                item.description = parseContent(response);
-
-                return item;
-            })
-        )
+                return parseContent(response);
+            });
+            return { ...item, description };
+        },
+        { concurrency: 3 }
     );
 
     return {
         title: (isValidType ? `[${$('.t .fn b').text()}] ` : '') + (search ? `[${SEARCH_NAMES[search]}] ` : '') + $('head title').text(),
         link: url.href,
         item: out,
-        allowEmpty: true,
     };
 }

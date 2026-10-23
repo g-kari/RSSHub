@@ -3,39 +3,46 @@ import { load } from 'cheerio';
 import type { Element } from 'domhandler';
 import type { Context } from 'hono';
 
-import type { Data, DataItem, Route } from '@/types';
+import type { Data, DataItem, Language, Route } from '@/types';
 import { ViewType } from '@/types';
 import cache from '@/utils/cache';
 import ofetch from '@/utils/ofetch';
 import { parseDate } from '@/utils/parse-date';
+import { getRouteLimit } from '@/utils/route-limit';
+
+const parsePublicationDate = (value?: string) => {
+    const date = value?.trim();
+    if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(parseDate(date, 'YYYY-MM-DD', true).getTime())) {
+        return;
+    }
+    return parseDate(`${date}T00:00:00+08:00`);
+};
 
 export const handler = async (ctx: Context): Promise<Data> => {
     const { id = 'home/zxdt' } = ctx.req.param();
-    const limit: number = Number.parseInt(ctx.req.query('limit') ?? '20', 10);
+    const limit = getRouteLimit(ctx, 20);
 
     const baseUrl = 'https://www.investor.org.cn';
-    const targetUrl: string = new URL(id.endsWith('/') ? id : `${id}/`, baseUrl).href;
+    const targetUrl = `${baseUrl}/${id.endsWith('/') ? id : `${id}/`}`;
 
     const response = await ofetch(targetUrl);
     const $: CheerioAPI = load(response);
-    const language = $('html').attr('lang') ?? 'zh';
+    const language = ($('html').attr('lang') ?? 'zh') as Language;
 
     let items: DataItem[] = $('div.right_content_item a')
         .slice(0, limit)
         .toArray()
-        .map((el): Element => {
+        .map((el) => {
             const $el: Cheerio<Element> = $(el);
 
             const title: string = $el.find('div.title').text();
             const pubDateStr: string | undefined = $el.find('div.date').text();
             const linkUrl: string | undefined = $el.attr('href');
-            const upDatedStr: string | undefined = pubDateStr;
 
             const processedItem: DataItem = {
                 title,
-                pubDate: pubDateStr ? parseDate(pubDateStr) : undefined,
+                pubDate: parsePublicationDate(pubDateStr),
                 link: linkUrl ? new URL(linkUrl, targetUrl).href : undefined,
-                updated: upDatedStr ? parseDate(upDatedStr) : undefined,
                 language,
             };
 
@@ -43,17 +50,17 @@ export const handler = async (ctx: Context): Promise<Data> => {
         });
 
     items = await Promise.all(
-        items.map((item) => {
+        items.map(async (item) => {
             if (!item.link || item.link.endsWith('.pdf')) {
                 return item;
             }
 
-            return cache.tryGet(item.link, async (): Promise<DataItem> => {
-                const detailResponse = await ofetch(item.link);
+            const detail = await cache.tryGet(`investor:article:${item.link}`, async (): Promise<DataItem> => {
+                const detailResponse = await ofetch(item.link!);
                 const $$: CheerioAPI = load(detailResponse);
 
-                const title: string = $$('div.text_content_detail_title h1').text() ?? item.title;
-                const description: string | undefined = $$('div.trs_editor_view').html() ?? undefined;
+                const title: string = $$('div.text_content_detail_title h1').text();
+                const description = $$('div.trs_editor_view').html();
                 const pubDateStr: string | undefined = $$('div.base_info_left span')
                     .toArray()
                     .some((el) => $$(el).text().includes('时间'))
@@ -67,37 +74,33 @@ export const handler = async (ctx: Context): Promise<Data> => {
                           .pop()
                           ?.trim()
                     : undefined;
-                const upDatedStr: string | undefined = pubDateStr;
 
                 const processedItem: DataItem = {
                     title,
                     description,
-                    pubDate: pubDateStr ? parseDate(pubDateStr) : item.pubDate,
+                    pubDate: parsePublicationDate(pubDateStr),
                     content: {
                         html: description,
-                        text: description,
+                        text: $$('div.trs_editor_view').text(),
                     },
-                    updated: upDatedStr ? parseDate(upDatedStr) : item.updated,
                     language,
                 };
 
-                return {
-                    ...item,
-                    ...processedItem,
-                };
+                return processedItem;
             });
+            return { ...item, ...detail, pubDate: detail.pubDate ?? item.pubDate };
         })
     );
 
     const title: string = $('title').text();
+    const imageSrc: string | undefined = $('div.fl a img').attr('src');
 
     return {
         title,
-        description: title.split(/\|/)?.[0],
+        description: title.split(/\|/, 1)?.[0],
         link: targetUrl,
         item: items,
-        allowEmpty: true,
-        image: $('div.fl a img').attr('src') ? new URL($('div.fl a img').attr('src') as string, baseUrl).href : undefined,
+        image: imageSrc ? new URL(imageSrc, baseUrl).href : undefined,
         author: title.split(/\|/).pop(),
         language,
         id: targetUrl,
@@ -282,12 +285,12 @@ export const route: Route = {
     },
     radar: [
         {
-            source: ['www.investor.org.cn/:id'],
-            target: '/:id',
+            source: ['www.investor.org.cn/'],
+            target: '/home/zxdt',
         },
         {
             title: '最新动态',
-            source: ['https://www.investor.org.cn/home/zxdt/'],
+            source: ['www.investor.org.cn/home/zxdt/'],
             target: '/home/zxdt',
         },
         {

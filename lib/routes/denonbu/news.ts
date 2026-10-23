@@ -117,15 +117,31 @@ async function getToken(): Promise<string> {
         return cacheToken;
     }
 
-    const payload = await ofetch(String(new URL('auths/token/get', BASE_URL)), {
-        headers: COMMON_HEADERS,
-    }).then((x) => x.payload);
-    const { token, expires } = payload;
+    const { token, expires } = (
+        await ofetch(new URL('auths/token/get', BASE_URL).href, {
+            headers: COMMON_HEADERS,
+        })
+    ).payload;
     if (!token) {
         throw new Error('Failed to get token');
     }
-    cache.set(CACHE_TOKEN_KEY, token, expires ? expires - Number(Date.now()) / 1000 - 1 : 3600);
+    cache.set(CACHE_TOKEN_KEY, token, expires ? expires - Date.now() / 1000 - 1 : 3600);
     return token;
+}
+
+interface NewsItem {
+    source_type: string;
+    id: number;
+    sid?: number;
+    uid?: string;
+    title?: string;
+    body: string;
+    post_date: string;
+    media?: string[];
+    account?: {
+        account_id?: string;
+    };
+    category: Array<{ name: string }>;
 }
 
 function buildLink(body: any): string | null {
@@ -159,33 +175,26 @@ async function handler(ctx: Context): Promise<Data> {
     const { area: _area } = ctx.req.param();
     const area = _area ?? 'news';
     const token = await getToken();
-    const data = await ofetch(String(new URL(`contents/search/${area}?limit=20&offset=0`, BASE_URL)), {
-        headers: {
-            ...COMMON_HEADERS,
-            Authorization: `Bearer ${token}`,
-        },
-    }).then((x) => x.payload.items);
+    const data = (
+        await ofetch(new URL(`contents/search/${area}?limit=20&offset=0`, BASE_URL).href, {
+            headers: {
+                ...COMMON_HEADERS,
+                Authorization: `Bearer ${token}`,
+            },
+        })
+    ).payload.items;
 
-    const items = data.map((item) => {
+    const items = data.map((item: NewsItem) => {
         const { title, body, post_date, category, media } = item;
         const link = buildLink(item);
         const result: DataItem = {
-            title: title ?? body.split('\n')[0],
+            title: title ?? body.split('\n', 1)[0],
             description: body,
-            pubDate: timezone(parseDate(post_date), +9),
+            pubDate: timezone(parseDate(post_date), 9),
             category: category.map((x) => x.name),
+            link: link ?? undefined,
+            image: media?.[0],
         };
-
-        if (media?.[0]) {
-            const firstMedia = media[0];
-            const imageUrl = typeof firstMedia === 'string' ? firstMedia : firstMedia?.url;
-            if (typeof imageUrl === 'string') {
-                result.image = imageUrl;
-            }
-        }
-        if (link) {
-            result.link = link;
-        }
 
         return result;
     });

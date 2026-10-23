@@ -1,7 +1,8 @@
 import { config } from '@/config';
-import type { DataItem, Route } from '@/types';
+import type { Data, Route } from '@/types';
 import cache from '@/utils/cache';
 import ofetch from '@/utils/ofetch';
+import { getRouteLimit } from '@/utils/route-limit';
 
 import { baseUrl, getBuildId, getData, getList } from './utils';
 
@@ -42,6 +43,7 @@ const sourceFeedQuery = /* GraphQL */ `
         sharedPost {
             id
             title
+            summary
             image
             readTime
             permalink
@@ -121,22 +123,19 @@ const sourceFeedQuery = /* GraphQL */ `
 `;
 
 export const route: Route = {
-    path: '/source/:sourceId/:innerSharedContent?',
+    path: '/source/:sourceId',
     example: '/daily/source/hn',
     parameters: {
         sourceId: 'The source id',
-        innerSharedContent: {
-            description: 'Where to Fetch inner Shared Posts instead of original',
-            default: 'false',
-            options: [
-                { value: 'false', label: 'False' },
-                { value: 'true', label: 'True' },
-            ],
-        },
     },
     radar: [
         {
+            source: ['daily.dev/sources/:sourceId'],
+            target: '/source/:sourceId',
+        },
+        {
             source: ['app.daily.dev/sources/:sourceId'],
+            target: '/source/:sourceId',
         },
     ],
     name: 'Source Posts',
@@ -145,21 +144,21 @@ export const route: Route = {
     url: 'app.daily.dev',
 };
 
-async function handler(ctx) {
+async function handler(ctx): Promise<Data> {
     const sourceId = ctx.req.param('sourceId');
-    const limit = ctx.req.query('limit') ? Number.parseInt(ctx.req.query('limit'), 10) : 10;
-    const innerSharedContent = ctx.req.param('innerSharedContent') ? JSON.parse(ctx.req.param('innerSharedContent')) : false;
+    const requestedLimit = getRouteLimit(ctx, 10);
+    const limit = ctx.req.query('sorted') === 'false' ? requestedLimit : Math.max(10, requestedLimit);
 
     const link = `${baseUrl}/sources/${sourceId}`;
     const buildId = await getBuildId();
 
-    const userData = (await cache.tryGet(`daily:source:${sourceId}`, async () => {
-        const response = await ofetch(`${baseUrl}/_next/data/${buildId}/en/sources/${sourceId}.json`);
+    const userData = await cache.tryGet(`daily:source:${sourceId}`, async () => {
+        const response = await ofetch<{ pageProps: { source: Source } }>(`${baseUrl}/_next/data/${buildId}/sources/${sourceId}.json`);
         return response.pageProps.source;
-    })) as Source;
+    });
 
     const items = await cache.tryGet(
-        `daily:source:${sourceId}:posts`,
+        `daily:source:${sourceId}:posts:${limit}`,
         async () => {
             const edges = await getData({
                 query: sourceFeedQuery,
@@ -172,7 +171,7 @@ async function handler(ctx) {
                     loggedIn: false,
                 },
             });
-            return getList(edges, innerSharedContent, true);
+            return getList(edges);
         },
         config.cache.routeExpire,
         false
@@ -182,7 +181,7 @@ async function handler(ctx) {
         title: `${userData.name} posts on daily.dev`,
         description: userData.description,
         link,
-        item: items as DataItem[],
+        item: items,
         image: userData.image,
         logo: userData.image,
         icon: userData.image,

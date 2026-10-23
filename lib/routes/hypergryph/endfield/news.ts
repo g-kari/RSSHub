@@ -1,7 +1,7 @@
-import * as cheerio from 'cheerio';
+import { load } from 'cheerio';
 
 import { config } from '@/config';
-import type { Route } from '@/types';
+import type { Language, Route } from '@/types';
 import cache from '@/utils/cache';
 import ofetch from '@/utils/ofetch';
 import { parseDate } from '@/utils/parse-date';
@@ -18,13 +18,18 @@ type NewsItem = {
     brief: string;
 };
 
+const parsePublicationDate = (value: number) => {
+    const date = Number.isFinite(value) && value > 0 ? parseDate(value, 'X') : undefined;
+    return date && Number.isFinite(date.getTime()) ? date : undefined;
+};
+
 const parseList = (list: NewsItem[]) =>
     list.map((item) => ({
         title: item.title,
         author: item.author,
         description: item.brief.trim().replaceAll('\n', '<br>'),
         link: `https://endfield.hypergryph.com/news/${item.cid}`,
-        pubDate: parseDate(item.displayTime, 'X'),
+        pubDate: parsePublicationDate(item.displayTime),
     }));
 
 export const route: Route = {
@@ -60,8 +65,8 @@ async function handler(ctx) {
     const bulletinList: NewsItem[] = await cache.tryGet(
         `hypergryph:endfield:news:${normalizedGroup}`,
         async () => {
-            const response = await ofetch(apiUrl);
-            return response.data.list as NewsItem[];
+            const response = await ofetch<{ data: { list: NewsItem[] } }>(apiUrl);
+            return response.data.list;
         },
         config.cache.routeExpire,
         false
@@ -73,7 +78,7 @@ async function handler(ctx) {
         list.map((item) =>
             cache.tryGet(item.link, async () => {
                 const response = await ofetch(item.link);
-                const $ = cheerio.load(response);
+                const $ = load(response);
 
                 // The detail page's article HTML appears in one of two shapes
                 // within the Next.js RSC stream (self.__next_f.push chunks):
@@ -98,7 +103,7 @@ async function handler(ctx) {
                     } catch {
                         continue;
                     }
-                    if (!Array.isArray(parsed) || parsed[0] !== 1 || typeof parsed[1] !== 'string') {
+                    if (!Array.isArray(parsed) || parsed[0] !== 1) {
                         continue;
                     }
                     const chunk: string = parsed[1];
@@ -121,8 +126,8 @@ async function handler(ctx) {
                         const colonIdx = line.indexOf(':');
                         if (colonIdx !== -1) {
                             try {
-                                const data = JSON.parse(line.slice(colonIdx + 1))?.[3]?.value?.bulletin?.data;
-                                if (typeof data === 'string') {
+                                const data: string | undefined = JSON.parse(line.slice(colonIdx + 1))?.[3]?.value?.bulletin?.data;
+                                if (data !== undefined) {
                                     item.description = data;
                                 }
                             } catch {
@@ -141,6 +146,6 @@ async function handler(ctx) {
         title: '《明日方舟：终末地》游戏公告与新闻',
         link: 'https://endfield.hypergryph.com/news',
         item: items,
-        language: 'zh-cn',
+        language: 'zh-CN' as const satisfies Language,
     };
 }
