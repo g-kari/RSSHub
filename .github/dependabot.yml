@@ -5,6 +5,8 @@ updates:
       schedule:
           interval: daily
           time: '08:00'
+      cooldown:
+          default-days: 1
       open-pull-requests-limit: 100
       labels:
           - dependencies
@@ -73,6 +75,8 @@ updates:
       schedule:
           interval: daily
           time: '08:00'
+      cooldown:
+          default-days: 1
       open-pull-requests-limit: 100
       labels:
           - dependencies
@@ -86,6 +90,8 @@ updates:
       schedule:
           interval: daily
           time: '08:00'
+      cooldown:
+          default-days: 1
       open-pull-requests-limit: 100
       labels:
           - dependencies
