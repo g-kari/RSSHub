@@ -7,6 +7,10 @@ on:
 
 jobs:
     cleanup:
+        # The `rsshub` container package only exists under the upstream
+        # owner, so on forks there is nothing to clean up and the cleanup
+        # action fails with a 404. Run this job on the upstream repo only.
+        if: github.repository == 'DIYgod/RSSHub'
         runs-on: ubuntu-slim
         permissions:
             packages: write
